@@ -3,7 +3,9 @@ package treeeditdistance
 // Node is a labeled node in an ordered tree. Children are kept in the order
 // in which they are added, which is significant for tree edit distance.
 type Node struct {
+	ID       int
 	Label    string
+	Value    any
 	Children []*Node
 }
 
@@ -11,6 +13,15 @@ type Node struct {
 func NewNode(label string, children ...*Node) *Node {
 	return &Node{
 		Label:    label,
+		Children: children,
+	}
+}
+
+// NewNodeWithValue creates a node while preserving the original value.
+func NewNodeWithValue(label string, value any, children ...*Node) *Node {
+	return &Node{
+		Label:    label,
+		Value:    value,
 		Children: children,
 	}
 }
@@ -39,6 +50,29 @@ type Tree struct {
 // NewTree creates a tree with root as its root node.
 func NewTree(root *Node) *Tree {
 	return &Tree{Root: root}
+}
+
+// assignIDs gives every node a unique 1-based postorder ID.
+func assignIDs(forest []*Node) {
+	nextID := 1
+
+	var walk func(*Node)
+	walk = func(node *Node) {
+		if node == nil {
+			return
+		}
+
+		for _, child := range node.Children {
+			walk(child)
+		}
+
+		node.ID = nextID
+		nextID++
+	}
+
+	for _, root := range forest {
+		walk(root)
+	}
 }
 
 // CreateSimilarTrees creates the two example trees shown in the tree edit

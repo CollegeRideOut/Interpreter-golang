@@ -1,264 +1,179 @@
 # contuts
 
-> How much can we understand about a code change without asking an AI what happened?
+> A tiny structural code-review tool for people who looked at a four-line diff and decided they needed an AST editor.
 
-`contuts` is an experimental code-analysis project exploring deterministic ways to understand how source code changes.
+`contuts` is an experimental Go project for exploring whether a program can explain a code change using deterministic evidence instead of immediately asking an AI to summarize it.
 
-The project currently starts at **AST differencing**: parse two versions of a program, match their syntax trees, and reconstruct the structural operations that transform one into the other.
+It is also, currently, a Raylib window containing one hard-coded Go calculator, four edit scripts, and a frankly unreasonable amount of machinery for changing `-` to `+`.
 
-The longer-term rabbit hole goes further:
+## What It Does Today
 
-**tree edit distance → AST matching → structural differencing → static analysis → control flow → code understanding**
+The program compares two in-memory Go source strings:
 
-This is not an AI code summarizer.
+```go
+// before
+case '+':
+    return left - right
+case '-':
+    return left - right
+```
 
-The interesting question is what we can derive from the program itself.
+```go
+// after
+case '+':
+    return left + right
+case '-':
+    return left - right
+case '*':
+    return left * right
+case '/':
+    return left / right
+case '%':
+    return left % right
+```
 
-## Why
+It then:
 
-A normal diff tells us what text changed:
+- Parses both versions into Go ASTs.
+- Converts those ASTs into GumTree-style trees.
+- Builds a small structural edit script containing one update and three insertions.
+- Displays the affected original AST nodes in a Raylib UI.
+- Displays the current working source beside the AST.
+- Lets each edit be selected and applied independently.
+- Lets a selected AST subtree apply all of its edits at once.
+- Supports undo and redo for individual edits.
+- Keeps everything in memory. Nothing is written to disk.
+
+The UI is intentionally focused on the original AST. Inserted cases do not magically become nodes in the original tree; they appear as separate edit rows attached to the affected source node instead.
+
+## Running It
+
+This is a Go project using Raylib through `raylib-go`.
+
+```bash
+go run .
+```
+
+Build it with:
+
+```bash
+go build .
+```
+
+The current UI expects this font to exist:
+
+```text
+/usr/share/fonts/liberation/LiberationSans-Regular.ttf
+```
+
+That is not a portable application packaging strategy. It is a prototype on a Linux machine that currently has that font installed.
+
+## Controls
+
+- `Up` / `Down`: move through affected AST/edit rows.
+- `Enter`: apply the selected edit.
+- `Shift+Enter`: apply all edits in the selected subtree.
+- Click an edit in the footer: select that individual edit.
+- `Ctrl+Z`: undo the most recent applied edit.
+- `Ctrl+Y`: redo the most recently undone edit.
+
+The three inserted cases are separate edits. Applying `case '*'` does not also apply `/` or `%`, despite all three initially sharing the same insertion anchor. The project has tests specifically for applying, undoing, redoing, and repeating that cycle.
+
+## Architecture, Such As It Is
+
+The interesting prototype code currently lives in:
+
+- `gumtree_diff.go`: in-memory examples, Go AST conversion, edit-script generation, source ranges, and edit history.
+- `main.go`: Raylib window, AST rows, source display, selection, and keyboard/mouse handling.
+- `gumtree_diff_test.go`: calculator diff and edit-history tests.
+- `third_party/gumtree-go`: a local GumTree fork used for AST comparison and mappings.
+
+The local GumTree copy is used through this module replacement:
+
+```go
+replace github.com/Xanonymous-GitHub/gumtree-go => ./third_party/gumtree-go
+```
+
+The fork currently supplies mappings and comparison support. The edit script shown by the UI is still custom code. This distinction matters because saying "GumTree generated the edit script" would be more impressive than accurate.
+
+## Tests
+
+Run all tests with:
+
+```bash
+go test ./...
+```
+
+The tests currently cover:
+
+- The expected calculator edit count and edit kinds.
+- The generated source matching the target after all edits.
+- Independent AST rows for each edit.
+- Basic update undo/redo.
+- Repeated apply, undo, and redo cycles for all calculator edits.
+
+## Why This Exists
+
+A text diff can tell us that this happened:
 
 ```diff
-- return x * 0.18
-+ return x * 0.20
+- return left - right
++ return left + right
 ```
 
-An AST gives us structure:
+An AST-oriented tool can describe it as an update to a binary expression, plus three inserted case clauses. That structural description is useful evidence. It is not intent, and it does not prove that the calculator is now correct.
+
+That boundary is the point of the experiment:
 
 ```text
-FunctionDeclaration
-└── ReturnStatement
-    └── InfixExpression
-        ├── Identifier(x)
-        ├── Operator(*)
-        └── Number(0.20)
+text diff       -> bytes changed
+AST diff        -> syntax changed
+symbol analysis -> relationships changed or affected
+control flow    -> paths that may change
+human judgment  -> what the change means
 ```
 
-An AST differ can potentially tell us:
+The project wants to explore the first four layers before pretending the fifth can be automated by putting a chatbot in a panel.
+
+## The Roadmap, In The Most Technically Honest Order
+
+- Replace the hard-coded source strings with real files.
+- Generate more complete insert, delete, update, and move scripts.
+- Improve mappings when AST children are inserted or reordered.
+- Make source ranges robust for overlapping and interacting edits.
+- Add proper structural visualization instead of colored text rows.
+- Add symbols, references, call graphs, control-flow, and data-flow analysis.
+- Eventually become useful.
+
+The last item is aspirational.
+
+## Current Limitations
+
+This is not yet:
+
+- A general-purpose Go diff tool.
+- A code editor.
+- A persistent review application.
+- A complete GumTree implementation.
+- An interpreter-driven semantic analyzer.
+- An AI replacement.
+
+It is a deliberately small laboratory for finding out how much complexity appears when you try to independently apply and reverse three inserted `case` clauses.
+
+That complexity is the feature. It is the bug we are studying.
+
+## The Larger Rabbit Hole
+
+The long-term idea is to move from:
 
 ```text
-UPDATE InfixExpression
-└── Number
-    0.18 → 0.20
+source change
+    -> AST mapping
+    -> edit script
+    -> affected symbols
+    -> callers and callees
+    -> control-flow impact
+    -> data-flow impact
 ```
 
-And static analysis can eventually tell us more:
-
-```text
-changed function
-    ↓
-references
-    ↓
-callers / callees
-    ↓
-control-flow impact
-    ↓
-data-flow relationships
-```
-
-These are different from statements like:
-
-> "This change fixes the tax calculation."
-
-That is an interpretation of the change.
-
-`contuts` is interested in the layer underneath it: **mechanically derived evidence about what changed and how the affected program is structured.**
-
-## The experiment
-
-Given:
-
-```text
-before.go
-    ↓
-  parser
-    ↓
-  AST A ─────────┐
-                 │
-              matcher
-                 │
-  AST B ─────────┘
-    ↑
-  parser
-    ↑
-after.go
-```
-
-Can we produce a useful structural description such as:
-
-```text
-MATCH   FunctionDeclaration calculate → calculate
-MATCH   ReturnStatement → ReturnStatement
-
-UPDATE  NumericLiteral
-        0.18 → 0.20
-```
-
-For simple changes, yes.
-
-The interesting problems start when the trees stop lining up nicely.
-
-```text
-BEFORE                  AFTER
-
-Program                 Program
-├── let x = 1           ├── let x = 1
-├── let y = 2           └── let z = 3
-└── let z = 3
-```
-
-A naive positional matcher might decide:
-
-```text
-MATCH   x → x
-UPDATE  y → z
-DELETE  z
-```
-
-A human would probably describe it as:
-
-```text
-MATCH   x → x
-DELETE  y
-MATCH   z → z
-```
-
-Determining those mappings is where AST differencing gets interesting.
-
-## Current status
-
-Very early.
-
-This repository is intentionally being built from simple implementations upward rather than starting by wrapping an existing AST-diff library.
-
-Current exploration:
-
-- [x] Lexer/parser/AST fundamentals
-- [x] Basic tree edit distance
-- [ ] Naive AST differ for the Monkey language
-- [ ] Node mapping experiments
-- [ ] Insert / delete / update edit scripts
-- [ ] Moves and reordered subtrees
-- [ ] Subtree similarity
-- [ ] GumTree-style matching
-- [ ] Compare against existing AST differs
-
-Later:
-
-- [ ] Symbol and reference analysis
-- [ ] Call graphs
-- [ ] Control-flow graphs
-- [ ] Data-flow analysis
-- [ ] Structural change visualization
-- [ ] Editor experiments
-
-None of that roadmap is sacred. This is a research project; following interesting failures is part of the point.
-
-## Why Monkey?
-
-The first AST differ is being implemented against the small language from *Writing an Interpreter in Go*.
-
-That's deliberate.
-
-Real languages have enormous syntax trees and years of edge cases. Monkey is small enough that both ASTs can be understood by hand, making bad mappings obvious.
-
-The goal isn't to build the world's greatest Monkey differ.
-
-The goal is to understand **why building a good differ is hard**.
-
-## Principles
-
-### Deterministic first
-
-If information can be derived mechanically from source code, prefer that over generating an explanation.
-
-### Facts and interpretation are different
-
-```text
-Git diff       → text changed
-AST diff       → structure changed
-Types          → symbol relationships
-Call graph     → possible calls
-CFG            → possible execution paths
-Data flow      → possible value propagation
-
-────────────────────────────────────
-
-Human / AI     → interpretation and intent
-```
-
-Both layers can be useful. They should not be confused.
-
-### Build the dumb version first
-
-This repository will contain bad algorithms. That's intentional.
-
-A naive implementation that fails on:
-
-```text
-[a, b, c]
-    ↓
-[a, c]
-```
-
-teaches more about the matching problem than immediately importing a mature implementation.
-
-Break it. Understand why. Then improve it.
-
-## Research rabbit holes
-
-Some of the work informing this project includes:
-
-- Tree Edit Distance
-- Zhang–Shasha
-- GumTree
-- Diff/AST
-- RefactoringMiner
-- AST mapping and edit-script generation
-- static program analysis
-- control-flow and data-flow analysis
-
-The project isn't attempting to reproduce all of them. They're increasingly sophisticated answers to questions this repository is trying to encounter naturally.
-
-## Eventually
-
-The vague destination is an environment where a developer can explore a change structurally:
-
-```text
-                CODE CHANGE
-                     │
-              ┌──────┴──────┐
-              │             │
-           Git Diff      AST Diff
-                            │
-                      Changed Symbol
-                            │
-                 ┌──────────┴──────────┐
-                 │                     │
-              Callers                 CFG
-                 │                     │
-              Types                Data Flow
-                 └──────────┬──────────┘
-                            │
-                         HUMAN
-```
-
-Instead of immediately asking:
-
-> "AI, explain this diff to me."
-
-the developer should be able to ask the program itself:
-
-> **What changed?**
-
-> **Where is it?**
-
-> **What does it connect to?**
-
-> **Where can execution go from here?**
-
-Then the human can decide what it means.
-
----
-
-Mostly, though, this repository is an excuse to get unreasonably nerdy about trees.
+Until then, `contuts` is mostly an excuse to get unreasonably nerdy about trees, source offsets, and undo stacks.

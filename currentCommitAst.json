@@ -1,0 +1,698 @@
+{
+  "kind": "*ast.File",
+  "value": "main",
+  "end": 369,
+  "fields": {
+    "Name": {
+      "kind": "*ast.Ident",
+      "value": "main",
+      "pos": 8,
+      "end": 12,
+      "values": {
+        "Name": "main"
+      }
+    }
+  },
+  "lists": {
+    "Comments": [],
+    "Decls": [
+      {
+        "kind": "*ast.GenDecl",
+        "value": "import",
+        "pos": 14,
+        "end": 43,
+        "lists": {
+          "Specs": [
+            {
+              "kind": "*ast.ImportSpec",
+              "pos": 24,
+              "end": 29,
+              "fields": {
+                "Path": {
+                  "kind": "*ast.BasicLit",
+                  "value": "\"log\"",
+                  "pos": 24,
+                  "end": 29,
+                  "values": {
+                    "Kind": "STRING",
+                    "Value": "\"log\""
+                  }
+                }
+              }
+            },
+            {
+              "kind": "*ast.ImportSpec",
+              "pos": 31,
+              "end": 41,
+              "fields": {
+                "Path": {
+                  "kind": "*ast.BasicLit",
+                  "value": "\"net/http\"",
+                  "pos": 31,
+                  "end": 41,
+                  "values": {
+                    "Kind": "STRING",
+                    "Value": "\"net/http\""
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "values": {
+          "Tok": "import"
+        }
+      },
+      {
+        "kind": "*ast.FuncDecl",
+        "pos": 45,
+        "end": 369,
+        "fields": {
+          "Body": {
+            "kind": "*ast.BlockStmt",
+            "pos": 57,
+            "end": 369,
+            "lists": {
+              "List": [
+                {
+                  "kind": "*ast.ExprStmt",
+                  "pos": 60,
+                  "end": 269,
+                  "fields": {
+                    "X": {
+                      "kind": "*ast.CallExpr",
+                      "pos": 60,
+                      "end": 269,
+                      "fields": {
+                        "Fun": {
+                          "kind": "*ast.SelectorExpr",
+                          "pos": 60,
+                          "end": 75,
+                          "fields": {
+                            "Sel": {
+                              "kind": "*ast.Ident",
+                              "value": "HandleFunc",
+                              "pos": 65,
+                              "end": 75,
+                              "values": {
+                                "Name": "HandleFunc"
+                              }
+                            },
+                            "X": {
+                              "kind": "*ast.Ident",
+                              "value": "http",
+                              "pos": 60,
+                              "end": 64,
+                              "values": {
+                                "Name": "http"
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "lists": {
+                        "Args": [
+                          {
+                            "kind": "*ast.BasicLit",
+                            "value": "\"/\"",
+                            "pos": 76,
+                            "end": 79,
+                            "values": {
+                              "Kind": "STRING",
+                              "Value": "\"/\""
+                            }
+                          },
+                          {
+                            "kind": "*ast.FuncLit",
+                            "pos": 81,
+                            "end": 268,
+                            "fields": {
+                              "Body": {
+                                "kind": "*ast.BlockStmt",
+                                "pos": 137,
+                                "end": 268,
+                                "lists": {
+                                  "List": [
+                                    {
+                                      "kind": "*ast.IfStmt",
+                                      "pos": 141,
+                                      "end": 217,
+                                      "fields": {
+                                        "Body": {
+                                          "kind": "*ast.BlockStmt",
+                                          "pos": 168,
+                                          "end": 217,
+                                          "lists": {
+                                            "List": [
+                                              {
+                                                "kind": "*ast.ExprStmt",
+                                                "pos": 173,
+                                                "end": 203,
+                                                "fields": {
+                                                  "X": {
+                                                    "kind": "*ast.CallExpr",
+                                                    "pos": 173,
+                                                    "end": 203,
+                                                    "fields": {
+                                                      "Fun": {
+                                                        "kind": "*ast.SelectorExpr",
+                                                        "pos": 173,
+                                                        "end": 186,
+                                                        "fields": {
+                                                          "Sel": {
+                                                            "kind": "*ast.Ident",
+                                                            "value": "NotFound",
+                                                            "pos": 178,
+                                                            "end": 186,
+                                                            "values": {
+                                                              "Name": "NotFound"
+                                                            }
+                                                          },
+                                                          "X": {
+                                                            "kind": "*ast.Ident",
+                                                            "value": "http",
+                                                            "pos": 173,
+                                                            "end": 177,
+                                                            "values": {
+                                                              "Name": "http"
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    },
+                                                    "lists": {
+                                                      "Args": [
+                                                        {
+                                                          "kind": "*ast.Ident",
+                                                          "value": "writer",
+                                                          "pos": 187,
+                                                          "end": 193,
+                                                          "values": {
+                                                            "Name": "writer"
+                                                          }
+                                                        },
+                                                        {
+                                                          "kind": "*ast.Ident",
+                                                          "value": "request",
+                                                          "pos": 195,
+                                                          "end": 202,
+                                                          "values": {
+                                                            "Name": "request"
+                                                          }
+                                                        }
+                                                      ]
+                                                    }
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "kind": "*ast.ReturnStmt",
+                                                "pos": 207,
+                                                "end": 213,
+                                                "lists": {
+                                                  "Results": []
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        "Cond": {
+                                          "kind": "*ast.BinaryExpr",
+                                          "value": "!=",
+                                          "pos": 144,
+                                          "end": 167,
+                                          "fields": {
+                                            "X": {
+                                              "kind": "*ast.SelectorExpr",
+                                              "pos": 144,
+                                              "end": 160,
+                                              "fields": {
+                                                "Sel": {
+                                                  "kind": "*ast.Ident",
+                                                  "value": "Path",
+                                                  "pos": 156,
+                                                  "end": 160,
+                                                  "values": {
+                                                    "Name": "Path"
+                                                  }
+                                                },
+                                                "X": {
+                                                  "kind": "*ast.SelectorExpr",
+                                                  "pos": 144,
+                                                  "end": 155,
+                                                  "fields": {
+                                                    "Sel": {
+                                                      "kind": "*ast.Ident",
+                                                      "value": "URL",
+                                                      "pos": 152,
+                                                      "end": 155,
+                                                      "values": {
+                                                        "Name": "URL"
+                                                      }
+                                                    },
+                                                    "X": {
+                                                      "kind": "*ast.Ident",
+                                                      "value": "request",
+                                                      "pos": 144,
+                                                      "end": 151,
+                                                      "values": {
+                                                        "Name": "request"
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            },
+                                            "Y": {
+                                              "kind": "*ast.BasicLit",
+                                              "value": "\"/\"",
+                                              "pos": 164,
+                                              "end": 167,
+                                              "values": {
+                                                "Kind": "STRING",
+                                                "Value": "\"/\""
+                                              }
+                                            }
+                                          },
+                                          "values": {
+                                            "Op": "!="
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "kind": "*ast.ExprStmt",
+                                      "pos": 220,
+                                      "end": 265,
+                                      "fields": {
+                                        "X": {
+                                          "kind": "*ast.CallExpr",
+                                          "pos": 220,
+                                          "end": 265,
+                                          "fields": {
+                                            "Fun": {
+                                              "kind": "*ast.SelectorExpr",
+                                              "pos": 220,
+                                              "end": 234,
+                                              "fields": {
+                                                "Sel": {
+                                                  "kind": "*ast.Ident",
+                                                  "value": "ServeFile",
+                                                  "pos": 225,
+                                                  "end": 234,
+                                                  "values": {
+                                                    "Name": "ServeFile"
+                                                  }
+                                                },
+                                                "X": {
+                                                  "kind": "*ast.Ident",
+                                                  "value": "http",
+                                                  "pos": 220,
+                                                  "end": 224,
+                                                  "values": {
+                                                    "Name": "http"
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          },
+                                          "lists": {
+                                            "Args": [
+                                              {
+                                                "kind": "*ast.Ident",
+                                                "value": "writer",
+                                                "pos": 235,
+                                                "end": 241,
+                                                "values": {
+                                                  "Name": "writer"
+                                                }
+                                              },
+                                              {
+                                                "kind": "*ast.Ident",
+                                                "value": "request",
+                                                "pos": 243,
+                                                "end": 250,
+                                                "values": {
+                                                  "Name": "request"
+                                                }
+                                              },
+                                              {
+                                                "kind": "*ast.BasicLit",
+                                                "value": "\"index.html\"",
+                                                "pos": 252,
+                                                "end": 264,
+                                                "values": {
+                                                  "Kind": "STRING",
+                                                  "Value": "\"index.html\""
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      }
+                                    }
+                                  ]
+                                }
+                              },
+                              "Type": {
+                                "kind": "*ast.FuncType",
+                                "pos": 81,
+                                "end": 136,
+                                "fields": {
+                                  "Params": {
+                                    "kind": "*ast.FieldList",
+                                    "pos": 85,
+                                    "end": 136,
+                                    "lists": {
+                                      "List": [
+                                        {
+                                          "kind": "*ast.Field",
+                                          "pos": 86,
+                                          "end": 112,
+                                          "fields": {
+                                            "Type": {
+                                              "kind": "*ast.SelectorExpr",
+                                              "pos": 93,
+                                              "end": 112,
+                                              "fields": {
+                                                "Sel": {
+                                                  "kind": "*ast.Ident",
+                                                  "value": "ResponseWriter",
+                                                  "pos": 98,
+                                                  "end": 112,
+                                                  "values": {
+                                                    "Name": "ResponseWriter"
+                                                  }
+                                                },
+                                                "X": {
+                                                  "kind": "*ast.Ident",
+                                                  "value": "http",
+                                                  "pos": 93,
+                                                  "end": 97,
+                                                  "values": {
+                                                    "Name": "http"
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          },
+                                          "lists": {
+                                            "Names": [
+                                              {
+                                                "kind": "*ast.Ident",
+                                                "value": "writer",
+                                                "pos": 86,
+                                                "end": 92,
+                                                "values": {
+                                                  "Name": "writer"
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        {
+                                          "kind": "*ast.Field",
+                                          "pos": 114,
+                                          "end": 135,
+                                          "fields": {
+                                            "Type": {
+                                              "kind": "*ast.StarExpr",
+                                              "pos": 122,
+                                              "end": 135,
+                                              "fields": {
+                                                "X": {
+                                                  "kind": "*ast.SelectorExpr",
+                                                  "pos": 123,
+                                                  "end": 135,
+                                                  "fields": {
+                                                    "Sel": {
+                                                      "kind": "*ast.Ident",
+                                                      "value": "Request",
+                                                      "pos": 128,
+                                                      "end": 135,
+                                                      "values": {
+                                                        "Name": "Request"
+                                                      }
+                                                    },
+                                                    "X": {
+                                                      "kind": "*ast.Ident",
+                                                      "value": "http",
+                                                      "pos": 123,
+                                                      "end": 127,
+                                                      "values": {
+                                                        "Name": "http"
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          },
+                                          "lists": {
+                                            "Names": [
+                                              {
+                                                "kind": "*ast.Ident",
+                                                "value": "request",
+                                                "pos": 114,
+                                                "end": 121,
+                                                "values": {
+                                                  "Name": "request"
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                {
+                  "kind": "*ast.ExprStmt",
+                  "pos": 272,
+                  "end": 321,
+                  "fields": {
+                    "X": {
+                      "kind": "*ast.CallExpr",
+                      "pos": 272,
+                      "end": 321,
+                      "fields": {
+                        "Fun": {
+                          "kind": "*ast.SelectorExpr",
+                          "pos": 272,
+                          "end": 283,
+                          "fields": {
+                            "Sel": {
+                              "kind": "*ast.Ident",
+                              "value": "Println",
+                              "pos": 276,
+                              "end": 283,
+                              "values": {
+                                "Name": "Println"
+                              }
+                            },
+                            "X": {
+                              "kind": "*ast.Ident",
+                              "value": "log",
+                              "pos": 272,
+                              "end": 275,
+                              "values": {
+                                "Name": "log"
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "lists": {
+                        "Args": [
+                          {
+                            "kind": "*ast.BasicLit",
+                            "value": "\"listening on http://localhost:8080\"",
+                            "pos": 284,
+                            "end": 320,
+                            "values": {
+                              "Kind": "STRING",
+                              "Value": "\"listening on http://localhost:8080\""
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                {
+                  "kind": "*ast.ExprStmt",
+                  "pos": 323,
+                  "end": 367,
+                  "fields": {
+                    "X": {
+                      "kind": "*ast.CallExpr",
+                      "pos": 323,
+                      "end": 367,
+                      "fields": {
+                        "Fun": {
+                          "kind": "*ast.SelectorExpr",
+                          "pos": 323,
+                          "end": 332,
+                          "fields": {
+                            "Sel": {
+                              "kind": "*ast.Ident",
+                              "value": "Fatal",
+                              "pos": 327,
+                              "end": 332,
+                              "values": {
+                                "Name": "Fatal"
+                              }
+                            },
+                            "X": {
+                              "kind": "*ast.Ident",
+                              "value": "log",
+                              "pos": 323,
+                              "end": 326,
+                              "values": {
+                                "Name": "log"
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "lists": {
+                        "Args": [
+                          {
+                            "kind": "*ast.CallExpr",
+                            "pos": 333,
+                            "end": 366,
+                            "fields": {
+                              "Fun": {
+                                "kind": "*ast.SelectorExpr",
+                                "pos": 333,
+                                "end": 352,
+                                "fields": {
+                                  "Sel": {
+                                    "kind": "*ast.Ident",
+                                    "value": "ListenAndServe",
+                                    "pos": 338,
+                                    "end": 352,
+                                    "values": {
+                                      "Name": "ListenAndServe"
+                                    }
+                                  },
+                                  "X": {
+                                    "kind": "*ast.Ident",
+                                    "value": "http",
+                                    "pos": 333,
+                                    "end": 337,
+                                    "values": {
+                                      "Name": "http"
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            "lists": {
+                              "Args": [
+                                {
+                                  "kind": "*ast.BasicLit",
+                                  "value": "\":8080\"",
+                                  "pos": 353,
+                                  "end": 360,
+                                  "values": {
+                                    "Kind": "STRING",
+                                    "Value": "\":8080\""
+                                  }
+                                },
+                                {
+                                  "kind": "*ast.Ident",
+                                  "value": "nil",
+                                  "pos": 362,
+                                  "end": 365,
+                                  "values": {
+                                    "Name": "nil"
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "Name": {
+            "kind": "*ast.Ident",
+            "value": "main",
+            "pos": 50,
+            "end": 54,
+            "values": {
+              "Name": "main"
+            }
+          },
+          "Type": {
+            "kind": "*ast.FuncType",
+            "pos": 45,
+            "end": 56,
+            "fields": {
+              "Params": {
+                "kind": "*ast.FieldList",
+                "pos": 54,
+                "end": 56,
+                "lists": {
+                  "List": []
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
+    "Imports": [
+      {
+        "kind": "*ast.ImportSpec",
+        "pos": 24,
+        "end": 29,
+        "fields": {
+          "Path": {
+            "kind": "*ast.BasicLit",
+            "value": "\"log\"",
+            "pos": 24,
+            "end": 29,
+            "values": {
+              "Kind": "STRING",
+              "Value": "\"log\""
+            }
+          }
+        }
+      },
+      {
+        "kind": "*ast.ImportSpec",
+        "pos": 31,
+        "end": 41,
+        "fields": {
+          "Path": {
+            "kind": "*ast.BasicLit",
+            "value": "\"net/http\"",
+            "pos": 31,
+            "end": 41,
+            "values": {
+              "Kind": "STRING",
+              "Value": "\"net/http\""
+            }
+          }
+        }
+      }
+    ]
+  },
+  "values": {
+    "GoVersion": ""
+  }
+}

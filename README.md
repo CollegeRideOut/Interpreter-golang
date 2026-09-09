@@ -4,11 +4,13 @@
 
 `contuts` is an experimental Go project for exploring whether a program can explain and transform a code change using deterministic evidence instead of immediately asking an AI to summarize or rewrite it.
 
-It is also, currently, a Raylib window containing one hard-coded Go calculator, four edit scripts, and a frankly unreasonable amount of machinery for changing `-` to `+`.
+It currently exports the compared Go ASTs and their edit script as JSON so the structural model can be tested independently of a UI.
+
+This is intentionally an experimental foundation. The project is currently searching for the right AST and edit representation before building a dependable interactive interface. The JSON artifacts are the source of inspection for now; Raylib is not the source of truth.
 
 ## What It Does Today
 
-The program compares two in-memory Go source strings:
+The program compares two versions of `main.go` in a directory:
 
 ```go
 // before
@@ -37,12 +39,11 @@ It then:
 - Parses both versions into Go ASTs.
 - Converts those ASTs into GumTree-style trees.
 - Builds a small structural edit script containing one update and three insertions.
-- Displays the affected original AST nodes in a Raylib UI.
-- Displays the current working source beside the AST.
-- Lets each edit be selected and applied independently.
-- Lets a selected AST subtree apply all of its edits at once.
-- Supports undo and redo for individual edits.
-- Keeps everything in memory. Nothing is written to disk.
+- Writes `previousCommitAst.json` for the `HEAD~1` AST.
+- Writes `currentCommitAst.json` for the working-tree AST.
+- Writes `editScript.json` for the generated edit script.
+
+The current output is intentionally structural rather than a finished program editor. The next goal is an intermediate AST that can represent parent nodes without their children, child nodes without all surrounding syntax, and invalid exploratory states without losing information.
 
 The UI is intentionally focused on the original AST. Inserted cases do not magically become nodes in the original tree; they appear as separate edit rows attached to the affected source node instead.
 
@@ -72,11 +73,22 @@ See [`DIRECTION.md`](DIRECTION.md) for the working product direction and next-st
 
 ## Running It
 
-This is a Go project using Raylib through `raylib-go`.
+This is a Go project. The current command is an AST export step.
 
 ```bash
 go run .
 ```
+
+By default this reads `TestProgram/main.go`. Pass another directory to compare
+that directory's working-tree `main.go` with its `HEAD~1` version:
+
+```bash
+go run . ./path/to/repository
+```
+
+The command writes `previousCommitAst.json`, `currentCommitAst.json`, and
+`editScript.json` in the current directory. The working-tree file is the
+target. The previous AST comes from `HEAD~1`.
 
 Build it with:
 
@@ -84,32 +96,15 @@ Build it with:
 go build .
 ```
 
-The current UI expects this font to exist:
-
-```text
-/usr/share/fonts/liberation/LiberationSans-Regular.ttf
-```
-
-That is not a portable application packaging strategy. It is a prototype on a Linux machine that currently has that font installed.
-
-## Controls
-
-- `Up` / `Down`: move through affected AST/edit rows.
-- `Enter`: apply the selected edit.
-- `Shift+Enter`: apply all edits in the selected subtree.
-- Click an edit in the footer: select that individual edit.
-- `Ctrl+Z`: undo the most recent applied edit.
-- `Ctrl+Y`: redo the most recently undone edit.
-
-The three inserted cases are separate edits. Applying `case '*'` does not also apply `/` or `%`, despite all three initially sharing the same insertion anchor. The project has tests specifically for applying, undoing, redoing, and repeating that cycle.
-
 ## Architecture, Such As It Is
 
 The interesting prototype code currently lives in:
 
-- `gumtree_diff.go`: in-memory examples, Go AST conversion, edit-script generation, source ranges, and edit history.
-- `main.go`: Raylib window, AST rows, source display, selection, and keyboard/mouse handling.
-- `gumtree_diff_test.go`: calculator diff and edit-history tests.
+- `gumtree_diff.go`: directory loading, Git revision reading, Go AST conversion, edit-script generation, source ranges, and edit history.
+- `main.go`: command entrypoint and the legacy UI implementation.
+- `ast_export.go`: JSON AST and edit-script export.
+- `ast_draft.go`: experimental mutable AST draft model and renderer.
+- `gumtree_diff_test.go`: directory-backed diff and edit-history tests.
 - `third_party/gumtree-go`: a local GumTree fork used for AST comparison and mappings.
 
 The local GumTree copy is used through this module replacement:
@@ -130,11 +125,11 @@ go test ./...
 
 The tests currently cover:
 
-- The expected calculator edit count and edit kinds.
+- The expected directory-backed diff and edit replay.
 - The generated source matching the target after all edits.
 - Independent AST rows for each edit.
 - Basic update undo/redo.
-- Repeated apply, undo, and redo cycles for all calculator edits.
+- Repeated apply, undo, and redo cycles for all generated edits.
 
 ## Related Code
 
@@ -166,7 +161,7 @@ A text diff can tell us that this happened:
 + return left + right
 ```
 
-An AST-oriented tool can describe it as an update to a binary expression, plus three inserted case clauses. That structural description is useful evidence. It is not intent, and it does not prove that the calculator is now correct.
+An AST-oriented tool can describe syntax updates and insertions in a way that is useful evidence. It is not intent, and it does not prove that the resulting program is correct.
 
 That boundary is the point of the experiment:
 
@@ -180,13 +175,31 @@ human judgment  -> what the change means
 
 The project wants to explore the first four layers before pretending the fifth can be automated by putting a chatbot in a panel. Later, OpenCode should be able to use the user-created working state, including which edits were kept and removed, rather than starting over and guessing intent.
 
+## Why Human Understanding Matters
+
+Speed is useful, but speed alone is not the product. A fast change is not necessarily a good change if it leaves the person with less understanding of the codebase, its dependencies, or its architecture.
+
+Architecture is not decoration. Folder boundaries, package boundaries, declarations, references, and call relationships affect how code behaves and how safely it can evolve. Treating the codebase as a black box is risky even when the system producing changes is highly capable.
+
+The project therefore keeps a human in the loop where human judgment adds real value: understanding structure, choosing consequences, and deciding what state to continue from. This is not a demand that a person manually approve every token. It is an attempt to make automated changes inspectable, reversible, and grounded in the structure of the program.
+
 ## The Roadmap, In The Most Technically Honest Order
 
-- Replace the hard-coded source strings with real files.
+- Support more than one file per directory.
+- Make the AST JSON and edit-script export the primary testable workflow.
+- Build a field-aware intermediate AST for parent-only and child-only edits.
+- Allow incomplete and invalid intermediate AST states.
+- Apply edits structurally instead of through source byte offsets.
+- Render valid intermediate ASTs back to Go.
+- Provide best-effort source and diagnostics for invalid intermediate ASTs.
 - Generate more complete insert, delete, update, and move scripts.
 - Improve mappings when AST children are inserted or reordered.
 - Make source ranges robust for overlapping and interacting edits.
 - Add proper structural visualization instead of colored text rows.
+- Add a folder and package architecture view.
+- Represent file, folder, package, and declaration moves explicitly.
+- Show the imports, references, tests, callers, and package boundaries affected by architectural changes.
+- Integrate OpenCode only after the structural state and provenance model are reliable.
 - Add symbols, references, call graphs, control-flow, and data-flow analysis.
 - Add affected-code context for selected edits.
 - Preserve named working states and edit provenance.
@@ -206,7 +219,7 @@ This is not yet:
 - An interpreter-driven semantic analyzer.
 - An AI replacement.
 
-It is a deliberately small laboratory for finding out how much expressive power and complexity appears when you let a user independently apply and reverse three inserted `case` clauses.
+It is a deliberately small laboratory for finding out how much expressive power and complexity appears when you let a user independently apply and reverse structural edits.
 
 That complexity is the feature. It is the bug we are studying.
 

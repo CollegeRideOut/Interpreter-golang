@@ -1,0 +1,132 @@
+{
+  "kind": "*ast.File",
+  "value": "main",
+  "end": 47,
+  "fields": {
+    "Name": {
+      "kind": "*ast.Ident",
+      "value": "main",
+      "pos": 8,
+      "end": 12,
+      "values": {
+        "Name": "main"
+      }
+    }
+  },
+  "lists": {
+    "Comments": [],
+    "Decls": [
+      {
+        "kind": "*ast.FuncDecl",
+        "pos": 14,
+        "end": 47,
+        "fields": {
+          "Body": {
+            "kind": "*ast.BlockStmt",
+            "pos": 26,
+            "end": 47,
+            "lists": {
+              "List": [
+                {
+                  "kind": "*ast.AssignStmt",
+                  "value": ":=",
+                  "pos": 30,
+                  "end": 37,
+                  "lists": {
+                    "Lhs": [
+                      {
+                        "kind": "*ast.Ident",
+                        "value": "x",
+                        "pos": 30,
+                        "end": 31,
+                        "values": {
+                          "Name": "x"
+                        }
+                      }
+                    ],
+                    "Rhs": [
+                      {
+                        "kind": "*ast.BasicLit",
+                        "value": "10",
+                        "pos": 35,
+                        "end": 37,
+                        "values": {
+                          "Kind": "INT",
+                          "Value": "10"
+                        }
+                      }
+                    ]
+                  },
+                  "values": {
+                    "Tok": ":="
+                  }
+                },
+                {
+                  "kind": "*ast.AssignStmt",
+                  "value": "=",
+                  "pos": 39,
+                  "end": 44,
+                  "lists": {
+                    "Lhs": [
+                      {
+                        "kind": "*ast.Ident",
+                        "value": "_",
+                        "pos": 39,
+                        "end": 40,
+                        "values": {
+                          "Name": "_"
+                        }
+                      }
+                    ],
+                    "Rhs": [
+                      {
+                        "kind": "*ast.Ident",
+                        "value": "x",
+                        "pos": 43,
+                        "end": 44,
+                        "values": {
+                          "Name": "x"
+                        }
+                      }
+                    ]
+                  },
+                  "values": {
+                    "Tok": "="
+                  }
+                }
+              ]
+            }
+          },
+          "Name": {
+            "kind": "*ast.Ident",
+            "value": "main",
+            "pos": 19,
+            "end": 23,
+            "values": {
+              "Name": "main"
+            }
+          },
+          "Type": {
+            "kind": "*ast.FuncType",
+            "pos": 14,
+            "end": 25,
+            "fields": {
+              "Params": {
+                "kind": "*ast.FieldList",
+                "pos": 23,
+                "end": 25,
+                "lists": {
+                  "List": []
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
+    "Imports": []
+  },
+  "values": {
+    "GoVersion": ""
+  }
+}

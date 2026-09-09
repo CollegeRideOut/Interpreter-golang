@@ -39,6 +39,19 @@ Applying an edit is not the same as accepting a code review. It is the user expl
 
 Removing an edit is not necessarily rejecting the entire proposal. It means the user wants to continue from a version without that transformation.
 
+## Current Position
+
+This project is deliberately very experimental and is still searching for the right representation of an editable program. The current milestone is intentionally smaller than a polished code canvas:
+
+- Read the previous and current versions of a Go program.
+- Generate complete, inspectable AST JSON for both versions.
+- Generate an explicit structural edit script.
+- Test the AST and edit model without depending on a UI.
+
+The next implementation step is an AST-first intermediate program. The working state should be a mutable tree with explicit fields and lists, not a collection of source-text patches. An `ExprStmt`, `CallExpr`, `ImportSpec`, `AssignStmt`, or `IfStmt` should be independently representable even when its children are missing. Invalid intermediate states are acceptable and should remain inspectable.
+
+The UI is not currently the source of truth. Raylib may eventually become a view over the AST state, but the AST model, edit operations, rendering behavior, and invariants must be understandable and testable without it.
+
 ## Example Flow
 
 ```text
@@ -110,6 +123,21 @@ The selected edit should expose closely related code in an easy-to-reach panel:
 
 The AST diff tells us what syntax changed. Semantic analysis tells us what code may be related or affected.
 
+## Folder Architecture View
+
+The tool should eventually support a folder- and package-level view in addition to the AST and source views. A user may sometimes want to understand or shape the architecture of the codebase rather than inspect one function at a time.
+
+This view could make structural operations such as these explicit:
+
+- Move a function or declaration between files.
+- Move files between packages or folders.
+- Split a file into smaller files.
+- Combine files when that improves cohesion.
+- Rename or reorganize packages and directories.
+- Show how moves affect imports, package boundaries, references, tests, and callers.
+
+Folder changes are still code changes. The tool should show their consequences across the codebase, preserve the relationship between the architectural operation and the resulting AST edits, and keep the operation reversible. The folder view should be another perspective on the same working state, not a separate untracked editing system.
+
 Keep these claims separate:
 
 ```text
@@ -131,6 +159,17 @@ Impact analysis -> code that may observe the change
 - The current working state belongs to the user.
 - Preserve provenance: remember where each working change came from.
 - Prefer explicit facts over invented summaries.
+- Optimize for understanding and control, not speed alone.
+- Treat architecture as part of the program, not as irrelevant packaging.
+- Do not hide codebase structure behind a black box merely because an AI can often produce a plausible result.
+
+## Human Understanding
+
+Human involvement is not automatically valuable just because it is human involvement. It is valuable when it helps a person understand what changed, what the code depends on, and what working state they are deliberately creating.
+
+Fast automation is useful when the task is understood and the consequences are cheap to inspect. It is risky when speed replaces understanding of the codebase, its boundaries, and its architecture. Even a highly capable model can produce a locally plausible change that is globally wrong, misplaced, or difficult to maintain.
+
+The goal is therefore not to force a human to approve every line. The goal is to preserve meaningful human control over structure, intent, and consequences while allowing automation to do the mechanical work. The right balance may change over time, but the product should measure success by the quality of understanding and resulting code state, not only by how quickly a patch appears.
 
 ## Next Steps
 
@@ -171,8 +210,18 @@ Impact analysis -> code that may observe the change
 
 ### Generalization
 
-- [ ] Replace hard-coded in-memory files with real files.
+- [x] Replace hard-coded in-memory files with a real working-tree file.
+- [x] Export the previous and current ASTs as inspectable JSON.
+- [x] Export the generated edit script as inspectable JSON.
+- [ ] Make the AST/edit export the primary development path before returning to UI work.
+- [ ] Define a field-aware intermediate AST that permits missing children and invalid states.
+- [ ] Apply edit scripts to the intermediate AST rather than source byte ranges.
+- [ ] Render complete intermediate ASTs back to Go source.
+- [ ] Provide best-effort rendering and diagnostics for incomplete ASTs.
 - [ ] Support multi-file packages.
+- [ ] Add a folder- and package-architecture view alongside the AST view.
+- [ ] Represent file, folder, package, and declaration moves as inspectable operations.
+- [ ] Show the imports, references, tests, and package boundaries affected by architectural moves.
 - [ ] Improve insert, delete, update, and move edit scripts.
 - [ ] Make source ranges robust for interacting edits.
 - [ ] Keep the small calculator example as a reliable demonstration.

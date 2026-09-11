@@ -15,14 +15,42 @@ import (
 )
 
 func main() {
-	directory := "TestProgram"
-	if len(os.Args) > 1 {
-		directory = os.Args[1]
+	interactive, directory, err := parseArguments(os.Args[1:])
+	if err != nil {
+		panic(err)
 	}
 
+	if interactive {
+		if err := runInteractive(directory); err != nil {
+			panic(err)
+		}
+		return
+	}
 	if err := exportASTDiff(directory); err != nil {
 		panic(err)
 	}
+}
+
+func parseArguments(arguments []string) (bool, string, error) {
+	interactive := false
+	directory := "TestProgram"
+	directorySet := false
+	for _, argument := range arguments {
+		switch argument {
+		case "--interactive":
+			interactive = true
+		default:
+			if strings.HasPrefix(argument, "-") {
+				return false, "", fmt.Errorf("unknown option %q", argument)
+			}
+			if directorySet {
+				return false, "", fmt.Errorf("only one repository directory may be provided")
+			}
+			directory = argument
+			directorySet = true
+		}
+	}
+	return interactive, directory, nil
 }
 
 func runRaylib(diff *inMemoryDiff) {

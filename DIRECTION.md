@@ -52,6 +52,22 @@ The next implementation step is an AST-first intermediate program. The working s
 
 The UI is not currently the source of truth. Raylib may eventually become a view over the AST state, but the AST model, edit operations, rendering behavior, and invariants must be understandable and testable without it.
 
+The current command surface reflects that priority:
+
+```text
+go run .
+    -> previousCommitAst.json
+    -> currentCommitAst.json
+    -> editScript.json
+
+go run . --interactive
+    -> numbered field-aware edit tree
+    -> apply one AST operation at a time
+    -> intermediateAst.json
+```
+
+The exported edit script should speak in terms of AST ownership and fields, such as `AssignStmt.Lhs[0]` or `GenDecl.Specs[0]`. Source positions and rendered text may be useful metadata, but they are not the edit model.
+
 ## Example Flow
 
 ```text
@@ -163,6 +179,18 @@ Impact analysis -> code that may observe the change
 - Treat architecture as part of the program, not as irrelevant packaging.
 - Do not hide codebase structure behind a black box merely because an AI can often produce a plausible result.
 
+## AST-First Development
+
+The project should earn its interactive interface from a reliable structural core. The development order is:
+
+1. Inspect the complete source and target ASTs.
+2. Inspect the generated field-aware edit operations.
+3. Apply operations to an intermediate AST.
+4. Test parent-only, child-only, deletion, and composition behavior.
+5. Render or visualize the resulting state.
+
+Raylib, a web interface, and OpenCode integration are observers and consumers of this state. They should not define the semantics of editing.
+
 ## Human Understanding
 
 Human involvement is not automatically valuable just because it is human involvement. It is valuable when it helps a person understand what changed, what the code depends on, and what working state they are deliberately creating.
@@ -213,9 +241,10 @@ The goal is therefore not to force a human to approve every line. The goal is to
 - [x] Replace hard-coded in-memory files with a real working-tree file.
 - [x] Export the previous and current ASTs as inspectable JSON.
 - [x] Export the generated edit script as inspectable JSON.
-- [ ] Make the AST/edit export the primary development path before returning to UI work.
-- [ ] Define a field-aware intermediate AST that permits missing children and invalid states.
-- [ ] Apply edit scripts to the intermediate AST rather than source byte ranges.
+- [x] Make the AST/edit export the primary development path before returning to UI work.
+- [x] Define a field-aware intermediate AST that permits missing children and invalid states.
+- [x] Apply edit scripts to the intermediate AST rather than source byte ranges.
+- [x] Add a terminal interactive mode for applying numbered AST operations.
 - [ ] Render complete intermediate ASTs back to Go source.
 - [ ] Provide best-effort rendering and diagnostics for incomplete ASTs.
 - [ ] Support multi-file packages.

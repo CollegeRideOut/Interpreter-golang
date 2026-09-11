@@ -58,7 +58,7 @@ func exportASTDiff(directory string) error {
 	if err := writeJSON("currentCommitAst.json", astJSONNodeFromGoAST(targetAST, targetFileSet)); err != nil {
 		return err
 	}
-	if err := writeJSON("editScript.json", editScriptsJSON(diff.scripts)); err != nil {
+	if err := writeJSON("editScript.json", simpleASTEditScripts(sourceAST, targetAST, sourceFileSet, targetFileSet)); err != nil {
 		return err
 	}
 

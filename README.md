@@ -1,12 +1,8 @@
 # contuts
 
-> A tiny structural code canvas for people who looked at a four-line diff and decided they needed an AST editor.
+`contuts` is an experimental AST exploration tool. It compares a previous Go program with the current working-tree program, exposes their structure as JSON, and lets a person apply field-aware AST edits from a terminal.
 
-`contuts` is an experimental Go project for exploring whether a program can explain and transform a code change using deterministic evidence instead of immediately asking an AI to summarize or rewrite it.
-
-It currently exports the compared Go ASTs and their edit script as JSON so the structural model can be tested independently of a UI.
-
-This is intentionally an experimental foundation. The project is currently searching for the right AST and edit representation before building a dependable interactive interface. The JSON artifacts are the source of inspection for now; Raylib is not the source of truth.
+The project is intentionally back at basics. The AST model and edit operations are being tested before building a dependable graphical interface.
 
 ## What It Does Today
 
@@ -37,19 +33,36 @@ case '%':
 It then:
 
 - Parses both versions into Go ASTs.
-- Converts those ASTs into GumTree-style trees.
-- Builds a small structural edit script containing one update and three insertions.
+- Builds field-aware structural edit operations.
 - Writes `previousCommitAst.json` for the `HEAD~1` AST.
 - Writes `currentCommitAst.json` for the working-tree AST.
 - Writes `editScript.json` for the generated edit script.
 
-The current output is intentionally structural rather than a finished program editor. The next goal is an intermediate AST that can represent parent nodes without their children, child nodes without all surrounding syntax, and invalid exploratory states without losing information.
+The AST JSON preserves relationships such as `AssignStmt.Lhs`, `AssignStmt.Rhs`, `GenDecl.Specs`, `CallExpr.Args`, and `BlockStmt.List`. The edit script describes AST operations, not source-text replacements.
 
-The UI is intentionally focused on the original AST. Inserted cases do not magically become nodes in the original tree; they appear as separate edit rows attached to the affected source node instead.
+## Interactive AST Mode
+
+Run:
+
+```bash
+go run . --interactive
+```
+
+The terminal prints a numbered edit tree:
+
+```text
+[ ] 1 INSERT *ast.GenDecl at Decls[0]
+  [ ] 2 INSERT *ast.ImportSpec at Specs[0]
+    [ ] 3 INSERT *ast.BasicLit at Path[0]
+```
+
+Enter an edit number to apply it, or `q` to quit. The current mutable AST is written to `intermediateAst.json` after each selection.
+
+Parent edits do not automatically materialize their children. Selecting a child attaches it to its AST field and creates the minimum missing parent path.
 
 ## Human Agency, With AI Leverage
 
-The point is not to make AI independently rewrite code, or to make a passive code-review viewer. The point is to let a person explore structural changes, choose what they want, and continue from the code state they created.
+The point is not to make AI independently rewrite code, or to make a passive code-review viewer. The point is to let a person inspect structure, choose AST operations, and continue from the state they deliberately created.
 
 ```text
 AI proposes possibilities
@@ -73,7 +86,7 @@ See [`DIRECTION.md`](DIRECTION.md) for the working product direction and next-st
 
 ## Running It
 
-This is a Go project. The current command is an AST export step.
+The default command exports the ASTs and edit script:
 
 ```bash
 go run .
@@ -101,11 +114,16 @@ go build .
 The interesting prototype code currently lives in:
 
 - `gumtree_diff.go`: directory loading, Git revision reading, Go AST conversion, edit-script generation, source ranges, and edit history.
-- `main.go`: command entrypoint and the legacy UI implementation.
+- `main.go`: command entrypoint and legacy UI code.
 - `ast_export.go`: JSON AST and edit-script export.
+- `ast_simple_diff.go`: field-aware structural AST comparison.
+- `interactive.go`: terminal edit listing and intermediate AST application.
 - `ast_draft.go`: experimental mutable AST draft model and renderer.
 - `gumtree_diff_test.go`: directory-backed diff and edit-history tests.
 - `third_party/gumtree-go`: a local GumTree fork used for AST comparison and mappings.
+
+The local GumTree copy remains available for comparison experiments, but the
+current JSON export and terminal workflow use the field-aware structural diff.
 
 The local GumTree copy is used through this module replacement:
 
@@ -130,6 +148,9 @@ The tests currently cover:
 - Independent AST rows for each edit.
 - Basic update undo/redo.
 - Repeated apply, undo, and redo cycles for all generated edits.
+- Field-aware assignment edits through `BlockStmt.List`, `AssignStmt.Lhs`, and `AssignStmt.Rhs`.
+- Parent-only and child-only intermediate AST operations.
+- Interactive argument parsing and AST application.
 
 ## Related Code
 
@@ -185,11 +206,11 @@ The project therefore keeps a human in the loop where human judgment adds real v
 
 ## The Roadmap, In The Most Technically Honest Order
 
-- Support more than one file per directory.
 - Make the AST JSON and edit-script export the primary testable workflow.
 - Build a field-aware intermediate AST for parent-only and child-only edits.
 - Allow incomplete and invalid intermediate AST states.
 - Apply edits structurally instead of through source byte offsets.
+- Support more than one file per directory.
 - Render valid intermediate ASTs back to Go.
 - Provide best-effort source and diagnostics for invalid intermediate ASTs.
 - Generate more complete insert, delete, update, and move scripts.

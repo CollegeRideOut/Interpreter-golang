@@ -1,0 +1,155 @@
+{
+  "id": "root",
+  "kind": "*ast.File",
+  "value": "main",
+  "children": [
+    {
+      "id": "root.Decls[0]",
+      "kind": "*ast.GenDecl",
+      "value": "import",
+      "field": "Decls",
+      "children": [
+        {
+          "id": "root.Decls[0].Specs[0]",
+          "kind": "*ast.ImportSpec",
+          "field": "Specs",
+          "children": [
+            {
+              "id": "root.Decls[0].Specs[0].Path",
+              "kind": "*ast.BasicLit",
+              "value": "\"log\"",
+              "field": "Path"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "root.Name",
+      "kind": "*ast.Ident",
+      "value": "main",
+      "field": "Name"
+    },
+    {
+      "id": "root.Decls[0]",
+      "kind": "*ast.FuncDecl",
+      "field": "Decls",
+      "children": [
+        {
+          "id": "root.Decls[0].Name",
+          "kind": "*ast.Ident",
+          "value": "main",
+          "field": "Name"
+        },
+        {
+          "id": "root.Decls[0].Type",
+          "kind": "*ast.FuncType",
+          "field": "Type",
+          "children": [
+            {
+              "id": "root.Decls[0].Type.Params",
+              "kind": "*ast.FieldList",
+              "field": "Params"
+            }
+          ]
+        },
+        {
+          "id": "root.Decls[0].Body",
+          "kind": "*ast.BlockStmt",
+          "field": "Body",
+          "children": [
+            {
+              "id": "root.Decls[1].Body.List[0]",
+              "kind": "*ast.ExprStmt",
+              "field": "List",
+              "children": [
+                {
+                  "id": "root.Decls[1].Body.List[0].X",
+                  "kind": "*ast.CallExpr",
+                  "field": "X",
+                  "children": [
+                    {
+                      "id": "root.Decls[1].Body.List[0].X.Args[1]",
+                      "kind": "*ast.FuncLit",
+                      "field": "Args",
+                      "index": 1,
+                      "children": [
+                        {
+                          "id": "root.Decls[1].Body.List[0].X.Args[1].Type",
+                          "kind": "*ast.FuncType",
+                          "field": "Type",
+                          "children": [
+                            {
+                              "id": "root.Decls[1].Body.List[0].X.Args[1].Type.Params",
+                              "kind": "*ast.FieldList",
+                              "field": "Params",
+                              "children": [
+                                {
+                                  "id": "root.Decls[1].Body.List[0].X.Args[1].Type.Params.List[0]",
+                                  "kind": "*ast.Field",
+                                  "field": "List",
+                                  "children": [
+                                    {
+                                      "id": "root.Decls[1].Body.List[0].X.Args[1].Type.Params.List[0].Type",
+                                      "kind": "*ast.SelectorExpr",
+                                      "field": "Type"
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "root.Decls[0].Body.List[0]",
+              "kind": "*ast.AssignStmt",
+              "value": ":=",
+              "field": "List",
+              "children": [
+                {
+                  "id": "root.Decls[0].Body.List[0].Lhs[0]",
+                  "kind": "*ast.Ident",
+                  "value": "x",
+                  "field": "Lhs"
+                },
+                {
+                  "id": "root.Decls[0].Body.List[0].Rhs[0]",
+                  "kind": "*ast.BasicLit",
+                  "value": "10",
+                  "field": "Rhs"
+                }
+              ]
+            },
+            {
+              "id": "root.Decls[0].Body.List[1]",
+              "kind": "*ast.AssignStmt",
+              "value": "=",
+              "field": "List",
+              "index": 1,
+              "children": [
+                {
+                  "id": "root.Decls[0].Body.List[1].Lhs[0]",
+                  "kind": "*ast.Ident",
+                  "value": "_",
+                  "field": "Lhs"
+                },
+                {
+                  "id": "root.Decls[0].Body.List[1].Rhs[0]",
+                  "kind": "*ast.Ident",
+                  "value": "x",
+                  "field": "Rhs"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

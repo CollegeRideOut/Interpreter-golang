@@ -1,261 +1,216 @@
 # contuts
 
-`contuts` is an experimental AST exploration tool. It compares a previous Go program with the current working-tree program, exposes their structure as JSON, and lets a person apply field-aware AST edits from a terminal.
+`contuts` is an experiment in giving people more ownership over AI-assisted software development.
 
-The project is intentionally back at basics. The AST model and edit operations are being tested before building a dependable graphical interface.
+The mission is simple:
 
-## What It Does Today
+> Keep the power of AI without giving up the human's understanding, judgment, or architectural agency.
 
-The program compares two versions of `main.go` in a directory:
+## The Problem
 
-```go
-// before
-case '+':
-    return left - right
-case '-':
-    return left - right
-```
+AI can produce a large amount of plausible code very quickly. That speed is useful, but it creates a serious problem: the person responsible for the code can lose track of why it exists, how it fits together, and which decisions were actually made.
 
-```go
-// after
-case '+':
-    return left + right
-case '-':
-    return left - right
-case '*':
-    return left * right
-case '/':
-    return left / right
-case '%':
-    return left % right
-```
+The result is often a black box. A change appears, it seems reasonable, and the human is asked to trust it.
 
-It then:
+`contuts` exists to explore a different relationship with AI. The human should be able to direct the work, inspect the consequences, keep some parts, reject others, and ask the AI to continue from the exact state they chose.
 
-- Parses both versions into Go ASTs.
-- Builds field-aware structural edit operations.
-- Writes `previousCommitAst.json` for the `HEAD~1` AST.
-- Writes `currentCommitAst.json` for the working-tree AST.
-- Writes `editScript.json` for the generated edit script.
+## An Honest Status Report
 
-The AST JSON preserves relationships such as `AssignStmt.Lhs`, `AssignStmt.Rhs`, `GenDecl.Specs`, `CallExpr.Args`, and `BlockStmt.List`. The edit script describes AST operations, not source-text replacements.
+This repository is not yet a finished product. It is an ironic and useful experiment: much of the current codebase was itself produced by AI as a black box. That is the exact problem this project is trying to solve.
 
-## Interactive AST Mode
+The current implementation contains a working structural AST prototype and an evolving desktop UI, but it is still closer to a laboratory than a dependable development tool. Some interactions are awkward, some abstractions are too low-level, and the workflow is not yet as directed or useful as it needs to be.
 
-Run:
+That honesty is part of the project. We should not claim to have solved human control while building a system nobody can understand or steer.
 
-```bash
-go run . --interactive
-```
-
-The terminal prints a numbered edit tree:
+## The Intended Workflow
 
 ```text
-[ ] 1 INSERT *ast.GenDecl at Decls[0]
-  [ ] 2 INSERT *ast.ImportSpec at Specs[0]
-    [ ] 3 INSERT *ast.BasicLit at Path[0]
+Human chooses the context
+        |
+        v
+AI proposes one or more alternatives
+        |
+        v
+Human inspects structure, intent, and consequences
+        |
+        v
+Human applies, removes, or combines changes
+        |
+        v
+The system preserves the chosen working state
+        |
+        v
+AI continues from that exact state
 ```
 
-Enter an edit number to apply it, or `q` to quit. The current mutable AST is written to `intermediateAst.json` after each selection.
+The AI should provide leverage, not ownership. The human should be able to say:
 
-Parent edits do not automatically materialize their children. Selecting a child attaches it to its AST field and creates the minimum missing parent path.
+- Continue from this state.
+- Keep this part and remove that part.
+- Show me another approach.
+- Explain the intention behind this change.
+- Move this code to a different part of the architecture.
 
-## Human Agency, With AI Leverage
+## What Exists Today
 
-The point is not to make AI independently rewrite code, or to make a passive code-review viewer. The point is to let a person inspect structure, choose AST operations, and continue from the state they deliberately created.
+The current prototype can:
+
+- Compare previous and current versions of a Go program.
+- Convert Go syntax into a field-aware structural AST.
+- Generate low-level insert, update, and delete edits.
+- Apply edits to an intermediate working tree.
+- Keep incomplete intermediate states inspectable.
+- Render best-effort source for partially assembled trees.
+- Apply, remove, and reconcile individual edits.
+- Explore edits in a Wails desktop UI.
+- Navigate the edit list with keyboard controls.
+- Show a lifted AST presentation while preserving low-level edits.
+- Display structural problems as red code markers with hover explanations.
+
+The low-level API remains important, but it is not the product by itself. It is the foundation on which a more meaningful human-directed workflow must be built.
+
+## Low-Level AST And Lifted Views
+
+The API represents detailed AST operations such as:
 
 ```text
-AI proposes possibilities
-Human explores and chooses
-The system preserves those choices
-AI continues from the chosen state
+CallExpr.Fun
+CallExpr.Args[0]
+SelectorExpr.X
+SelectorExpr.Sel
+FuncType.Params
+BlockStmt.List[0]
 ```
 
-Applying and removing edits are therefore intentional parts of the interaction. They are not accept/reject buttons for a review; they are a way to express intent without manually rewriting syntax. The user can keep one transformation, remove another, inspect the consequences, and treat the resulting working source as their current state.
+These details are useful for correctness and provenance, but they are often not the right level for a person trying to guide a change.
 
-The longer-term flow is:
+The UI therefore needs progressively lifted views. A lifted view may hide mechanical shells such as an expression statement or a required body block while preserving every meaningful child edit. The low-level AST view must always remain available.
+
+Lifting is presentation, not a second editing system. It must never erase edit identity, provenance, reversibility, or user control.
+
+## Folder-First Architecture
+
+The next major perspective is a folder- and package-first view.
+
+The human should be able to begin with:
 
 ```text
-structural diff
-    -> user applies and removes edits
-    -> current working code
-    -> OpenCode continues from that exact state
+folders -> packages -> files -> declarations -> code
 ```
 
-See [`DIRECTION.md`](DIRECTION.md) for the working product direction and next-step list.
+before being forced into individual syntax nodes. This is important because architecture is not merely a graph generated by a tool. Architecture is also the mental model a person builds while understanding a system. That model is personal, evolving, and not fully recoverable from a diagram.
 
-## Running It
+The folder view should help a person direct operations such as:
 
-The default command exports the ASTs and edit script:
+- Move a function or declaration between files.
+- Split or combine files.
+- Reorganize packages and folders.
+- Inspect import and dependency consequences.
+- Compare alternative architectural arrangements.
+
+The view should remain connected to the same reversible working state as the AST view.
+
+## Intent Comments
+
+Comments that explain why an AI proposed a change should be separate from the code itself.
+
+They should be:
+
+- Toggleable.
+- Attached to an edit or group of edits.
+- Clearly distinguished from source comments.
+- Written as intent and rationale, not as noisy narration.
+
+The user should be able to turn them off and read clean code, or turn them on when evaluating an AI proposal.
+
+## Multiple AI Alternatives
+
+The user should be able to request multiple versions of a change rather than accept the first plausible answer.
+
+Each version should preserve:
+
+- Its proposed edits.
+- Its explanation of intent.
+- Its affected context.
+- Its relationship to the current working state.
+
+The human should be able to compare alternatives, apply parts from one, reject parts from another, and continue with a deliberate combination.
+
+## OpenCode Integration
+
+OpenCode is a natural future partner for this workflow.
+
+The AI should receive more than a prompt and a file. It should receive the user's actual working context:
+
+- Current source state.
+- Applied edits.
+- Removed edits.
+- Selected alternatives.
+- Relevant folder and package context.
+- Edit provenance.
+- User-visible intent comments.
+
+The AI should continue from what the human chose instead of starting over and guessing.
+
+## Running The Prototype
+
+Export the structural data:
 
 ```bash
 go run .
 ```
 
-By default this reads `TestProgram/main.go`. Pass another directory to compare
-that directory's working-tree `main.go` with its `HEAD~1` version:
+Run the terminal editor:
 
 ```bash
-go run . ./path/to/repository
+go run . --interactive
 ```
 
-The command writes `previousCommitAst.json`, `currentCommitAst.json`, and
-`editScript.json` in the current directory. The working-tree file is the
-target. The previous AST comes from `HEAD~1`.
-
-Build it with:
+Build the Go program:
 
 ```bash
 go build .
 ```
 
-## Architecture, Such As It Is
-
-The interesting prototype code currently lives in:
-
-- `gumtree_diff.go`: directory loading, Git revision reading, Go AST conversion, edit-script generation, source ranges, and edit history.
-- `main.go`: command entrypoint and legacy UI code.
-- `ast_export.go`: JSON AST and edit-script export.
-- `ast_simple_diff.go`: field-aware structural AST comparison.
-- `interactive.go`: terminal edit listing and intermediate AST application.
-- `ast_draft.go`: experimental mutable AST draft model and renderer.
-- `gumtree_diff_test.go`: directory-backed diff and edit-history tests.
-- `third_party/gumtree-go`: a local GumTree fork used for AST comparison and mappings.
-
-The local GumTree copy remains available for comparison experiments, but the
-current JSON export and terminal workflow use the field-aware structural diff.
-
-The local GumTree copy is used through this module replacement:
-
-```go
-replace github.com/Xanonymous-GitHub/gumtree-go => ./third_party/gumtree-go
-```
-
-The fork currently supplies mappings and comparison support. The edit script shown by the UI is still custom code. This distinction matters because saying "GumTree generated the edit script" would be more impressive than accurate.
-
-## Tests
-
-Run all tests with:
+Run tests:
 
 ```bash
 go test ./...
 ```
 
-The tests currently cover:
+Build the desktop application:
 
-- The expected directory-backed diff and edit replay.
-- The generated source matching the target after all edits.
-- Independent AST rows for each edit.
-- Basic update undo/redo.
-- Repeated apply, undo, and redo cycles for all generated edits.
-- Field-aware assignment edits through `BlockStmt.List`, `AssignStmt.Lhs`, and `AssignStmt.Rhs`.
-- Parent-only and child-only intermediate AST operations.
-- Interactive argument parsing and AST application.
+```bash
+cd desktop
+wails build
+```
 
-## Related Code
+The default example uses `TestProgram/main.go`. A repository directory can be supplied to compare its working-tree `main.go` with `HEAD~1`.
 
-The selected edit should eventually show more than the changed syntax. A nearby context panel should make it easy to inspect:
+## Project Principles
 
-- The containing function or declaration.
-- Identifiers inside the changed node.
-- Where those identifiers are defined and used.
-- Direct callers and callees.
-- Related files and top-level functions.
-- Available expression, parameter, and return types.
+- Human direction comes first.
+- AI provides leverage, not authority.
+- The current working state belongs to the user.
+- Every meaningful transformation should be inspectable.
+- Every applied transformation should be reversible.
+- Low-level provenance must not be sacrificed for a simpler UI.
+- Lifted views may simplify presentation but must not change semantics.
+- Architecture should be shaped by human understanding, not merely inferred by graphs.
+- Facts, interpretations, and AI suggestions must be distinguishable.
+- The project must be honest about what it does not yet understand.
 
-The AST diff tells us what syntax changed. Semantic analysis tells us what code may be related or affected. Those claims should remain separate:
+## The Standard We Are Aiming For
+
+The project succeeds when this feels natural:
 
 ```text
-AST diff        -> syntax changed
-Type analysis   -> types changed or stayed the same
-References      -> definitions and uses
-Call analysis   -> callers and callees
-Impact analysis -> code that may observe the change
+The AI proposes several possibilities.
+I understand what each one means.
+I choose the direction.
+I keep and remove specific parts.
+I see the working code I created.
+I ask the AI to continue from there.
 ```
 
-## Why This Exists
-
-A text diff can tell us that this happened:
-
-```diff
-- return left - right
-+ return left + right
-```
-
-An AST-oriented tool can describe syntax updates and insertions in a way that is useful evidence. It is not intent, and it does not prove that the resulting program is correct.
-
-That boundary is the point of the experiment:
-
-```text
-text diff       -> bytes changed
-AST diff        -> syntax changed
-symbol analysis -> relationships changed or affected
-control flow    -> paths that may change
-human judgment  -> what the change means
-```
-
-The project wants to explore the first four layers before pretending the fifth can be automated by putting a chatbot in a panel. Later, OpenCode should be able to use the user-created working state, including which edits were kept and removed, rather than starting over and guessing intent.
-
-## Why Human Understanding Matters
-
-Speed is useful, but speed alone is not the product. A fast change is not necessarily a good change if it leaves the person with less understanding of the codebase, its dependencies, or its architecture.
-
-Architecture is not decoration. Folder boundaries, package boundaries, declarations, references, and call relationships affect how code behaves and how safely it can evolve. Treating the codebase as a black box is risky even when the system producing changes is highly capable.
-
-The project therefore keeps a human in the loop where human judgment adds real value: understanding structure, choosing consequences, and deciding what state to continue from. This is not a demand that a person manually approve every token. It is an attempt to make automated changes inspectable, reversible, and grounded in the structure of the program.
-
-## The Roadmap, In The Most Technically Honest Order
-
-- Make the AST JSON and edit-script export the primary testable workflow.
-- Build a field-aware intermediate AST for parent-only and child-only edits.
-- Allow incomplete and invalid intermediate AST states.
-- Apply edits structurally instead of through source byte offsets.
-- Support more than one file per directory.
-- Render valid intermediate ASTs back to Go.
-- Provide best-effort source and diagnostics for invalid intermediate ASTs.
-- Generate more complete insert, delete, update, and move scripts.
-- Improve mappings when AST children are inserted or reordered.
-- Make source ranges robust for overlapping and interacting edits.
-- Add proper structural visualization instead of colored text rows.
-- Add a folder and package architecture view.
-- Represent file, folder, package, and declaration moves explicitly.
-- Show the imports, references, tests, callers, and package boundaries affected by architectural changes.
-- Integrate OpenCode only after the structural state and provenance model are reliable.
-- Add symbols, references, call graphs, control-flow, and data-flow analysis.
-- Add affected-code context for selected edits.
-- Preserve named working states and edit provenance.
-- Let OpenCode continue from the user's current code state.
-- Eventually become useful.
-
-The last item is aspirational.
-
-## Current Limitations
-
-This is not yet:
-
-- A general-purpose Go diff tool.
-- A conventional code editor.
-- A persistent review application.
-- A complete GumTree implementation.
-- An interpreter-driven semantic analyzer.
-- An AI replacement.
-
-It is a deliberately small laboratory for finding out how much expressive power and complexity appears when you let a user independently apply and reverse structural edits.
-
-That complexity is the feature. It is the bug we are studying.
-
-## The Larger Rabbit Hole
-
-The long-term idea is to move from:
-
-```text
-source change
-    -> AST mapping
-    -> edit script
-    -> affected symbols
-    -> callers and callees
-    -> control-flow impact
-    -> data-flow impact
-```
-
-Until then, `contuts` is mostly an excuse to get unreasonably nerdy about trees, source offsets, and undo stacks.
+That is the product: human ownership and agency, amplified rather than replaced by AI.

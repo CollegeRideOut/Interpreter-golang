@@ -1,180 +1,189 @@
 # contuts
 
-`contuts` is an experiment in giving people more ownership over AI-assisted software development.
+`contuts` is an exploratory project for directing AI-assisted construction of a codebase.
 
-The mission is simple:
+The human chooses the target state. AI helps find and build the path toward it. The system exposes the concrete transformations along the way so the human can apply, reject, repeat, alter, or undo them.
 
-> Keep the power of AI without giving up the human's understanding, judgment, or architectural agency.
+This is not primarily a code summary tool. It is not an attempt to recover the true intent of an AI-generated change. Intent is not reliably observable. A model's explanation is a claim, not a fact.
 
-## The Problem
+The product we are looking for is a way to say:
 
-AI can produce a large amount of plausible code very quickly. That speed is useful, but it creates a serious problem: the person responsible for the code can lose track of why it exists, how it fits together, and which decisions were actually made.
+```text
+Create this file.
+Add this function here.
+Take this if statement and put it in these functions.
+Rename this value in that copy.
+Let me see the exact edits as they are built.
+```
 
-The result is often a black box. A change appears, it seems reasonable, and the human is asked to trust it.
+## The Mission
 
-`contuts` exists to explore a different relationship with AI. The human should be able to direct the work, inspect the consequences, keep some parts, reject others, and ask the AI to continue from the exact state they chose.
+AI can be faster and more capable than the person directing it. That does not make AI the owner of the product.
+
+The human owns the target state and the sequence of decisions. AI is a subordinate planner and operator. It may propose a transformation or locate a likely error, but it should not silently decide what becomes part of the codebase.
+
+```text
+Human chooses a target
+        |
+        v
+AI proposes a concrete transformation
+        |
+        v
+Human selects, changes, or rejects it
+        |
+        v
+contuts materializes visible edits
+        |
+        v
+The program enters a new working state
+        |
+        v
+Human chooses the next target
+```
+
+The goal is not to make the human approve every token. The goal is to keep the human first in the causal chain of program construction.
 
 ## An Honest Status Report
 
-This repository is not yet a finished product. It is an ironic and useful experiment: much of the current codebase was itself produced by AI as a black box. That is the exact problem this project is trying to solve.
+This repository is a gimmick today. It is also a serious exploratory experiment into whether a better interaction is possible.
 
-The current implementation contains a working structural AST prototype and an evolving desktop UI, but it is still closer to a laboratory than a dependable development tool. Some interactions are awkward, some abstractions are too low-level, and the workflow is not yet as directed or useful as it needs to be.
+Much of this codebase was built by AI as a black box. That is ironic because the black-box relationship is the problem this project is trying to fix. The current code proves interesting AST and working-state mechanics, but it is not yet the directed construction product described here.
 
-That honesty is part of the project. We should not claim to have solved human control while building a system nobody can understand or steer.
+The current UI exposes too much low-level machinery without a sufficiently useful construction loop. We should not pretend that displaying AST edits automatically gives a human control over architecture, behavior, or AI intent.
 
-## The Intended Workflow
+The project is valuable only if the mechanics become useful for directing transformations. If they do not, this remains a gimmick and ordinary agents, Git, tests, and an editor are better tools.
 
-```text
-Human chooses the context
-        |
-        v
-AI proposes one or more alternatives
-        |
-        v
-Human inspects structure, intent, and consequences
-        |
-        v
-Human applies, removes, or combines changes
-        |
-        v
-The system preserves the chosen working state
-        |
-        v
-AI continues from that exact state
+## Directed Transformations
+
+The basic unit is a concrete transformation, not a summary.
+
+Suppose the user selects this real piece of code:
+
+```go
+if err != nil {
+    return err
+}
 ```
 
-The AI should provide leverage, not ownership. The human should be able to say:
-
-- Continue from this state.
-- Keep this part and remove that part.
-- Show me another approach.
-- Explain the intention behind this change.
-- Move this code to a different part of the architecture.
-
-## What Exists Today
-
-The current prototype can:
-
-- Compare previous and current versions of a Go program.
-- Convert Go syntax into a field-aware structural AST.
-- Generate low-level insert, update, and delete edits.
-- Apply edits to an intermediate working tree.
-- Keep incomplete intermediate states inspectable.
-- Render best-effort source for partially assembled trees.
-- Apply, remove, and reconcile individual edits.
-- Explore edits in a Wails desktop UI.
-- Navigate the edit list with keyboard controls.
-- Show a lifted AST presentation while preserving low-level edits.
-- Display structural problems as red code markers with hover explanations.
-
-The low-level API remains important, but it is not the product by itself. It is the foundation on which a more meaningful human-directed workflow must be built.
-
-## Low-Level AST And Lifted Views
-
-The API represents detailed AST operations such as:
+The user chooses three destination functions. `contuts` expands the request into three independently visible operations:
 
 ```text
-CallExpr.Fun
-CallExpr.Args[0]
-SelectorExpr.X
-SelectorExpr.Sel
-FuncType.Params
-BlockStmt.List[0]
+1. Insert this IfStmt into foo.Body[2]
+2. Insert this IfStmt into bar.Body[4]
+3. Insert this IfStmt into baz.Body[1]
 ```
 
-These details are useful for correctness and provenance, but they are often not the right level for a person trying to guide a change.
+Each result can be applied, rejected, moved, renamed, or undone independently.
 
-The UI therefore needs progressively lifted views. A lifted view may hide mechanical shells such as an expression statement or a required body block while preserving every meaningful child edit. The low-level AST view must always remain available.
-
-Lifting is presentation, not a second editing system. It must never erase edit identity, provenance, reversibility, or user control.
-
-## Folder-First Architecture
-
-The next major perspective is a folder- and package-first view.
-
-The human should be able to begin with:
+The initial transformation model should be deliberately concrete:
 
 ```text
-folders -> packages -> files -> declarations -> code
+select a real node or subtree
+capture that fragment
+choose a destination
+duplicate, replace, move, wrap, or delete
+make substitutions explicitly
+preview the resulting edits
+apply or reject the operation
 ```
 
-before being forced into individual syntax nodes. This is important because architecture is not merely a graph generated by a tool. Architecture is also the mental model a person builds while understanding a system. That model is personal, evolving, and not fully recoverable from a diagram.
+Generalized templates and pattern rules may come later. The user should not need to design a transformation language just to repeat a piece of code.
 
-The folder view should help a person direct operations such as:
+## AI As A Subordinate Operator
 
-- Move a function or declaration between files.
-- Split or combine files.
-- Reorganize packages and folders.
-- Inspect import and dependency consequences.
-- Compare alternative architectural arrangements.
+AI can locate a likely error or propose a repair:
 
-The view should remain connected to the same reversible working state as the AST view.
+```text
+Compiler reports an error at line 18
+        |
+        v
+AI points to a likely AST node
+        |
+        v
+contuts shows the node and its context
+        |
+        v
+AI proposes a bounded transformation
+        |
+        v
+Human says yes, no, or do it differently
+```
 
-## Intent Comments
+The proposal must remain inert until the human invokes it. A model saying “I fixed it” is not evidence that the problem was fixed. The system should show:
 
-Comments that explain why an AI proposed a change should be separate from the code itself.
+- The source location or node involved.
+- The exact transformation proposed.
+- Every low-level edit it would create.
+- The resulting working state.
+- Diagnostics and verification results.
 
-They should be:
+It must distinguish observed facts, AI hypotheses, and verified outcomes. It must not claim to know what the AI really intended.
 
-- Toggleable.
-- Attached to an edit or group of edits.
-- Clearly distinguished from source comments.
-- Written as intent and rationale, not as noisy narration.
+## Current Prototype
 
-The user should be able to turn them off and read clean code, or turn them on when evaluating an AI proposal.
+The codebase currently contains:
 
-## Multiple AI Alternatives
+- Go AST export and field-aware structural diffs.
+- Low-level insert, update, delete, and reconciliation experiments.
+- A mutable intermediate working tree.
+- Reversible application and removal of edits.
+- Best-effort rendering of incomplete states.
+- A Wails desktop UI for exploring structural edits.
+- Lifted views over some low-level AST operations.
+- Structural error markers for incomplete representations.
 
-The user should be able to request multiple versions of a change rather than accept the first plausible answer.
+These are foundations, not proof of the final product. The current implementation is mainly a single-file Go structural editing experiment. It does not yet provide reliable multi-file transformations, AI proposal integration, durable branches, or the full directed workflow.
 
-Each version should preserve:
+## Why Invalid States Matter
 
-- Its proposed edits.
-- Its explanation of intent.
-- Its affected context.
-- Its relationship to the current working state.
+The user should be allowed to construct a program in a wrong or incomplete state.
 
-The human should be able to compare alternatives, apply parts from one, reject parts from another, and continue with a deliberate combination.
+```text
+Create the file.
+Create the declaration.
+Leave the function incomplete.
+Add the wrong type on purpose.
+See what breaks.
+Ask AI for a repair.
+Apply only the repair chosen by the human.
+```
 
-## OpenCode Integration
+Compilation, parsing, type checking, and tests are observations about a state. They should inform the next decision, not erase the state or prevent exploration unless the user explicitly asks for a constraint.
 
-OpenCode is a natural future partner for this workflow.
+## Source, Structure, And Edits
 
-The AI should receive more than a prompt and a file. It should receive the user's actual working context:
+The AST is the transformation substrate. Source is the human-facing result. Every high-level operation must expand into concrete, inspectable edits.
 
-- Current source state.
-- Applied edits.
-- Removed edits.
-- Selected alternatives.
-- Relevant folder and package context.
-- Edit provenance.
-- User-visible intent comments.
+The system should preserve:
 
-The AI should continue from what the human chose instead of starting over and guessing.
+- The selected source fragment.
+- Its structural representation.
+- Its original provenance.
+- Its destination.
+- Explicit substitutions and renames.
+- The before and after state.
+- The operation that produced each edit.
+
+A high-level row such as `repeat selected IfStmt in 3 functions` is only a convenient parent operation. The three materialized edits underneath it are the real result.
+
+## Future Views
+
+The product may eventually work from:
+
+```text
+folders -> packages -> files -> declarations -> AST nodes
+```
+
+This is not because a generated graph can tell us what the architecture truly means. It is because users may want to direct a transformation at the folder, package, file, declaration, or node level.
+
+Every view must lead to the same working state and the same concrete edit history. A higher-level view may organize edits, but it must not hide or silently rewrite them.
 
 ## Running The Prototype
 
-Export the structural data:
-
 ```bash
 go run .
-```
-
-Run the terminal editor:
-
-```bash
 go run . --interactive
-```
-
-Build the Go program:
-
-```bash
 go build .
-```
-
-Run tests:
-
-```bash
 go test ./...
 ```
 
@@ -187,30 +196,31 @@ wails build
 
 The default example uses `TestProgram/main.go`. A repository directory can be supplied to compare its working-tree `main.go` with `HEAD~1`.
 
-## Project Principles
+## Principles
 
-- Human direction comes first.
-- AI provides leverage, not authority.
-- The current working state belongs to the user.
-- Every meaningful transformation should be inspectable.
-- Every applied transformation should be reversible.
-- Low-level provenance must not be sacrificed for a simpler UI.
-- Lifted views may simplify presentation but must not change semantics.
-- Architecture should be shaped by human understanding, not merely inferred by graphs.
-- Facts, interpretations, and AI suggestions must be distinguishable.
-- The project must be honest about what it does not yet understand.
+- The human owns the target state.
+- AI may propose, but does not own execution.
+- A transformation is more important than its summary.
+- Every meaningful operation must materialize into visible edits.
+- Repetition creates independently controllable edit instances.
+- Renames and substitutions must be explicit.
+- Invalid intermediate states are allowed.
+- Diagnostics are evidence, not authority.
+- AI intent is a claim, never a fact.
+- High-level views must remain connected to low-level edits.
+- Operations must be inspectable, reversible, and replayable.
+- The project must be honest about what it cannot know.
 
-## The Standard We Are Aiming For
+## The Product Test
 
-The project succeeds when this feels natural:
+The product is moving in the right direction when a user can say:
 
 ```text
-The AI proposes several possibilities.
-I understand what each one means.
-I choose the direction.
-I keep and remove specific parts.
-I see the working code I created.
-I ask the AI to continue from there.
+Put the program in this state.
+Use AI to help build the next step.
+Show me exactly what it did.
+No, keep this part and change that part.
+Now continue from the state I chose.
 ```
 
-That is the product: human ownership and agency, amplified rather than replaced by AI.
+That is the product we are searching for. The current repository is only the beginning.

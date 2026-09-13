@@ -2,296 +2,285 @@
 
 ## Mission
 
-`contuts` should return meaningful ownership and agency to the human in AI-assisted software development.
+`contuts` is a directed program-transformation environment.
 
-AI is powerful at generating possibilities, exploring implementation details, and performing mechanical work. The human is responsible for the direction of the system: what it should become, how its boundaries should evolve, and which tradeoffs are acceptable.
+The human chooses the target state of the codebase. AI helps construct transformations toward that state. `contuts` makes those transformations concrete, visible, reversible, and controllable.
 
-The product should maximize human involvement where involvement creates understanding and direction, while allowing AI to do the work that machines are good at.
+The product is not primarily about summarizing AI output or recovering AI intent. Neither is reliably possible. The product is about controlling the transition from one program state to another.
 
-## The Honest Starting Point
+## The Core Distinction
 
-The current codebase is an ironic experiment. Much of it was built by AI as a black box, with the human observing and correcting behavior after the fact. That is the failure mode this project is intended to address.
-
-The current prototype proves that structural edits and an intermediate working state are possible. It does not yet provide a genuinely useful directed workflow. The UI can feel like a gimmick because it exposes many mechanical operations without yet giving the human enough meaningful control over the larger change.
-
-This is not a reason to hide the mechanics. It is a reason to put the mechanics in service of a better interaction.
-
-## Product Thesis
-
-The human should not have to choose between:
-
-- Manually controlling every token and losing the speed of AI.
-- Accepting a black-box rewrite and losing understanding of the system.
-
-`contuts` should provide a third option:
+There is a major difference between these two workflows:
 
 ```text
-AI does substantial work.
-Human controls the direction and consequences.
-The system preserves the decisions.
+Ask AI for a program
+    -> receive a large patch
+    -> receive a summary
+    -> try to understand what happened
 ```
 
-## Core Workflow
+and:
 
 ```text
-Human selects a meaningful context
-        |
-        v
-AI proposes multiple possible changes
-        |
-        v
-Human inspects intent, structure, and impact
-        |
-        v
-Human keeps, removes, or combines edits
-        |
-        v
-The system records the resulting working state
-        |
-        v
-AI continues from that state
+Choose a target state
+    -> direct the next transformation
+    -> inspect the edits being materialized
+    -> accept, reject, or alter them
+    -> observe the resulting state
 ```
 
-The human should be able to direct the process with statements such as:
+The second workflow is the direction of the project.
+
+The human does not need to understand the AI's private reasoning. The human needs to control what transformation is attempted and what state becomes current.
+
+## Human Authority
+
+AI may be more capable than the human at implementation. It is still below the human in authority.
 
 ```text
-Continue from this working state.
-Keep the API change but not the implementation detail.
-Show me three architectural alternatives.
-Explain the intention of this group of edits.
-Move this responsibility into another package.
+Human: chooses the target and constraints
+AI: proposes or performs bounded implementation work
+contuts: materializes and exposes the transformation
+Human: decides whether the next state is accepted
 ```
 
-## Current Product Position
+The AI must not silently mutate the working state. “Fix this” should produce a proposed transformation. The user must be able to say yes, no, or do it differently.
 
-The project has moved from pure engine exploration into UI workflow exploration.
+## The Transformation Model
 
-The engine work remains foundational:
-
-- Field-aware AST representation.
-- Structural edit provenance.
-- Intermediate incomplete states.
-- Reversible application and removal.
-- Best-effort rendering.
-
-But the engine is not the final user experience. A list of low-level AST edits is not, by itself, a meaningful way to direct an AI. The UI must progressively expose higher-value choices while preserving the underlying detail for inspection.
-
-## Progressive Lifting
-
-The API should remain low-level and complete. The UI should add views above it.
-
-A lifted view is a projection of the same edit state. It is not a new edit system and must not silently merge or destroy edits.
-
-The progression should be cautious:
-
-1. Hide mechanical wrappers while preserving their children.
-2. Group edits around meaningful constructs such as functions, conditions, calls, and declarations.
-3. Expose intent and consequences for those groups.
-4. Let the human move between lifted and low-level detail at any time.
-5. Add folder and package operations above file and AST operations.
-
-Examples of possible presentation-only shells include:
-
-- Required function or control-flow body blocks.
-- Expression-statement wrappers.
-- Declaration-statement wrappers.
-- Import-spec wrappers.
-- Field-list wrappers.
-
-The UI must remain context-sensitive. An explicit nested block that creates a scope is meaningful and should not be hidden merely because it is a `BlockStmt`.
-
-## Meaningful Structure
-
-Not every AST node deserves equal attention in the primary workflow.
-
-The system should distinguish:
-
-- Mechanical shells needed to assemble valid syntax.
-- Meaningful constructs that express behavior or architecture.
-- Values and identifiers that carry concrete content.
-- Structural errors that prevent a legal representation.
-- Differences from an AI proposal that are not errors.
-
-An edit being different from what the AI proposed is not a structural error. A valid `if` placed in a different valid block is still structurally valid.
-
-## Comments And Intent
-
-AI-generated rationale should be independently toggleable.
-
-Intent comments should:
-
-- Explain why a group of changes was proposed.
-- Be attached to edits, groups, or architectural operations.
-- Remain distinct from source comments.
-- Be hidden when the user wants a clean code view.
-- Be visible when the user is evaluating alternatives.
-
-The system should never force speculative AI explanation into the code itself.
-
-## Folder-First View
-
-The human should be able to begin at the level where architecture is usually understood:
+The first model should be concrete rather than a general-purpose rule language.
 
 ```text
-folders -> packages -> files -> declarations -> syntax
+select(anchor)
+capture(subtree)
+duplicate(subtree, destination)
+replace(target, subtree)
+move(target, destination)
+wrap(target, wrapper)
+delete(target)
+substitute(edit, explicit bindings)
+preview(edit)
+apply(edit)
+remove(edit)
 ```
 
-The folder-first view should support human-directed operations such as:
+The input and output of an operation are working-state revisions. An operation should record:
 
-- Moving a function or declaration between files.
-- Splitting a file by responsibility.
-- Combining files when cohesion improves.
-- Reorganizing packages and directories.
-- Reviewing import, reference, test, and dependency consequences.
-- Comparing alternative layouts proposed by AI.
+- Input working-state revision.
+- Selected node or subtree.
+- Destination and insertion mode.
+- Explicit substitutions or renames.
+- Materialized low-level edits.
+- Output working-state revision.
+- Diagnostics produced by the new state.
 
-The folder view must be another projection of the same working state. It must not create a second untracked source of truth.
+The operation makes no claim that behavior or intent is correct. It records what was requested and what was structurally produced.
 
-## Human Mental Models And Graphs
+## Concrete Replication
 
-Graphs, dependency maps, call graphs, and architecture diagrams are useful instruments. They are not the architecture itself.
+Replication is a central use case.
 
-The architecture a person builds in their head is shaped by experience, goals, constraints, and evolving understanding. It is not fully captured by automatically generated nodes and edges. The product should help the human develop and test that mental model rather than pretending that a graph can replace it.
+The user selects:
 
-The system can show facts:
+```go
+if err != nil {
+    return err
+}
+```
+
+Then selects target locations in several functions. The system expands the request into separate instances:
 
 ```text
-AST diff        -> syntax changed
-Type analysis   -> types changed or stayed the same
-References      -> definitions and uses
-Call analysis   -> callers and callees
-Impact analysis -> code that may observe a change
+Transform: repeat selected IfStmt
+
+Instance 1: insert into foo.Body[2]
+Instance 2: insert into bar.Body[4]
+Instance 3: insert into baz.Body[1]
 ```
 
-The human still decides what those facts mean for the architecture.
+The transform is a convenient parent. Each instance is an ordinary concrete edit with its own:
 
-## Multiple Versions
+- Target.
+- Substitutions.
+- Before and after source.
+- Diagnostics.
+- Applied or rejected status.
+- Provenance back to the selected fragment.
 
-AI should be able to propose multiple versions of a change.
+The user can apply instances 1 and 3, reject instance 2, and continue. A bulk operation must never hide partial success.
 
-Each proposal should retain its own:
+## Explicit Substitution And Renaming
 
-- Working-state basis.
-- Structural edits.
-- Intent explanation.
-- Affected context.
-- Provenance.
+Copied code must not be silently adapted.
 
-The human should be able to:
-
-- Compare proposals.
-- Apply one proposal completely.
-- Apply selected edits from several proposals.
-- Reject edits without losing the alternatives.
-- Ask for another version based on the chosen combination.
-
-This is more useful than asking the human to approve one opaque patch.
-
-## OpenCode Integration
-
-OpenCode should eventually live inside the workflow rather than beside it as an unrelated chat panel.
-
-The AI context should include:
-
-- The selected folder, package, file, or AST context.
-- Current source and working state.
-- Applied edits.
-- Removed edits.
-- Unapplied alternatives.
-- User-selected proposal versions.
-- Intent comments.
-- Relevant provenance and affected-code information.
-
-OpenCode should be able to explain, propose, revise, and continue. It should not reset the user's decisions or silently replace their working state.
-
-## Principles
-
-- Human direction comes first.
-- AI provides leverage, not authority.
-- The human owns the current working state.
-- A proposal is not a command.
-- A target difference is not automatically an error.
-- Structural errors must be distinguished from preference differences.
-- Every meaningful transformation should be inspectable.
-- Every applied transformation should be reversible.
-- Low-level provenance must remain available.
-- Lifted views simplify presentation, not semantics.
-- Comments about intent are optional and separate from source.
-- Architecture is shaped by human understanding, not only by generated graphs.
-- Facts, interpretations, and suggestions must be distinguishable.
-- The project must document its own uncertainty honestly.
-
-## Roadmap
-
-### 1. Make The Current UI Coherent
-
-- Make low-level AST edits understandable.
-- Make lifted views preserve all meaningful children.
-- Make apply, remove, sibling, and subtree operations predictable.
-- Make structural errors visible in source without replacing source content.
-- Show exactly why an edit is structurally invalid.
-
-### 2. Continue Lifting Carefully
-
-- Lift additional mechanical wrappers.
-- Add construct-level groups without hiding low-level edits.
-- Make every lifted feature independently toggleable.
-- Preserve a clear path from a high-level presentation to raw AST edits.
-
-### 3. Make Working State First-Class
-
-- Add named checkpoints.
-- Preserve edit history and provenance.
-- Compare working states.
-- Allow returning to previous decisions.
-- Make combinations of AI proposals explicit.
-
-### 4. Add Intent Comments
-
-- Attach rationale to edits and groups.
-- Toggle intent comments independently from source.
-- Distinguish AI explanation from verified facts.
-
-### 5. Build The Folder-First View
-
-- Support multi-file packages.
-- Show folder, package, file, and declaration structure.
-- Represent moves and reorganizations as reversible operations.
-- Show architectural consequences across imports, references, and tests.
-
-### 6. Support Multiple AI Proposals
-
-- Request several versions.
-- Compare versions structurally and architecturally.
-- Combine selected edits.
-- Preserve rejected alternatives.
-
-### 7. Integrate OpenCode
-
-- Send the real working state to OpenCode.
-- Continue from human decisions.
-- Ask for explanations and alternatives in context.
-- Keep the user in control of which proposal becomes active.
-
-### 8. Add Semantic And Impact Analysis
-
-- Resolve definitions and uses.
-- Show callers and callees.
-- Show type information when available.
-- Show affected tests and packages.
-- Keep analysis claims separate from human judgment.
-
-## The Product Test
-
-The product is moving in the right direction when this interaction feels natural:
+When a selected fragment contains `err`, the target may contain `err`, `parseErr`, another value, or no suitable value. The system may detect collisions and suggest choices, but the mapping must be visible and explicit:
 
 ```text
-The AI offers possibilities.
-I understand what they mean.
-I choose the architectural direction.
-I keep and remove specific changes.
-I see the working state I created.
-I ask the AI to continue from there.
+source binding: err
+target function: ParseFile
+available candidates: err, parseErr
+selected mapping: err -> parseErr
 ```
 
-The goal is not human approval of every token. The goal is meaningful human ownership of structure, intent, and direction while AI performs substantial work.
+The initial system should support concrete substitutions and capture holes without requiring the user to author a formal template:
+
+```text
+selected fragment
+    -> mark this expression as a hole
+    -> fill it with a selected target node
+    -> preview the concrete result
+```
+
+Semantic equivalence must not be assumed. A type-compatible rename is still a human decision.
+
+## Placement
+
+A destination is a concrete structural location, not a vague pattern.
+
+The user should be able to choose:
+
+- Insert before a node.
+- Insert after a node.
+- Prepend or append to a list.
+- Replace a node.
+- Wrap a node.
+- Move a node to another parent.
+
+Target queries may eventually select many locations, but the complete target set must be shown before application. The first implementation should prioritize manually selected destinations because they are easier to reason about and test.
+
+## AI As A Subordinate Operator
+
+AI is useful for finding and proposing transformations:
+
+```text
+compiler error or user request
+    -> likely line or node
+    -> user opens the relevant structure
+    -> AI proposes a bounded transform
+    -> user invokes or changes it
+    -> contuts materializes the edits
+```
+
+For example, AI may identify a likely error node and suggest replacing one expression. It must not silently repair unrelated code or claim that its interpretation of the problem is true.
+
+All AI-generated work must enter the same transformation system as human-created work. There should be no hidden AI edit path.
+
+## Intermediate And Wrong States
+
+Invalid states are part of directed construction.
+
+The user may intentionally create:
+
+- An incomplete declaration.
+- A missing expression.
+- A type mismatch.
+- An unresolved identifier.
+- A function in the wrong package.
+- A broken import relationship.
+
+The system should preserve and display these states. It should attach observations rather than erase the state:
+
+```text
+Structural state: incomplete
+Parser state: failed at line 18
+Type state: unavailable
+Tests: not run
+AI suggestion: replace this expression
+```
+
+These categories must remain separate:
+
+- The transformation could not be materialized.
+- The resulting structure is incomplete or invalid.
+- The code parses but fails type checking.
+- The code builds but tests fail.
+- The AI proposal differs from the user's preference.
+
+## Identity And Repetition
+
+AST pointers and numeric indexes are not durable identities. Mutations can rebuild parents and shift list positions.
+
+The system needs explicit lineage and working-tree instance identity:
+
+```text
+origin: where the selected fragment came from
+instance: this occurrence in the current working state
+```
+
+A copied subtree receives a new instance identity while retaining provenance to its source. An edit also records its working-state revision and structural anchor.
+
+If an anchor becomes stale or ambiguous, the edit becomes pending or conflicted. It must not be silently moved to a location that merely appears similar.
+
+## Source Fidelity
+
+The AST should be the structural transformation surface, but source remains the user-facing artifact.
+
+The system should preserve untouched source bytes where possible and render only changed structural regions. Comments, formatting, and generated code need explicit policies. A source-text fallback may exist, but it must be labeled as a text operation rather than presented as a structurally safe transformation.
+
+## Views
+
+The user should be able to move between levels without losing the underlying edits:
+
+```text
+folder
+    -> package
+        -> file
+            -> declaration
+                -> AST node
+                    -> token or field
+```
+
+Higher-level views are navigation and targeting surfaces. They are not authoritative summaries of what a change means. Every high-level operation must expand to visible low-level edits.
+
+## What Not To Build First
+
+Do not begin with:
+
+- AI-generated summaries as the primary experience.
+- A formal transformation language.
+- Automatic intent inference.
+- Automatic application to every similar location.
+- Silent binding or rename decisions.
+- Semantic-preservation claims.
+- Hidden AI mutations.
+- Mandatory validity gates.
+- A graph that pretends to be the user's architecture.
+
+These may become useful later, but they should earn their place by reducing the cost of directed transformation.
+
+## Minimal Useful Experiment
+
+Build one complete vertical slice:
+
+1. Select a real AST subtree.
+2. Capture it without losing provenance.
+3. Select one or more concrete destinations.
+4. Duplicate it into those destinations.
+5. Show one independent materialized edit per destination.
+6. Allow explicit substitutions and renames.
+7. Preview before and after source.
+8. Apply or reject each instance independently.
+9. Permit invalid intermediate states.
+10. Undo and continue from the chosen state.
+
+The first demonstration should be a user copying a newly created `if` statement into several functions, changing the relevant identifier in each copy, and watching the program move through visible working states.
+
+## Product Test
+
+The product is working when a user can say:
+
+```text
+Put the program in this state.
+Use AI to help construct the next transformation.
+Show me every edit it creates.
+No. Keep this part and change that part.
+Now continue from the state I chose.
+```
+
+The product is not working if it only produces a persuasive summary after an opaque rewrite.
+
+## Current Reality
+
+The current repository is not this product yet. It is an AI-built, partially understood AST and working-state experiment. That makes it an appropriate place to explore the problem, but not evidence that the problem has been solved.
+
+The project should keep the mechanics only if they lead to a better directed construction loop. Otherwise, we should be willing to call the experiment a gimmick and stop pretending that more AST controls alone will create value.

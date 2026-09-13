@@ -1,0 +1,197 @@
+<main class="shell">
+  <header class="topbar">
+    <div class="brand-mark">ct</div>
+    <div>
+      <p class="eyebrow">CONTUTS / STRUCTURAL REVIEW</p>
+      <h1>Choose a program to inspect</h1>
+    </div>
+    <div class="status-chip" [class.ready]="snapshot()">
+      <span class="status-dot"></span>
+      {{ snapshot() ? 'Session loaded' : 'No session' }}
+    </div>
+  </header>
+
+  <section class="workspace">
+    <aside class="sidebar">
+      <div class="section-label">PROGRAM</div>
+      <label class="field-label" for="program-path">Directory</label>
+      <input
+        id="program-path"
+        [value]="programPath()"
+        (input)="programPath.set($any($event.target).value)"
+        placeholder="/path/to/go/program"
+      />
+      <button class="primary-button" (click)="openProgram()" [disabled]="loading()">
+        {{ loading() ? 'Opening...' : 'Open program' }}
+        <span aria-hidden="true">↗</span>
+      </button>
+      <p class="hint">The directory must contain <code>main.go</code> and a previous Git version.</p>
+      <label class="reconcile-toggle">
+        <input type="checkbox" [checked]="autoReconcile()" (change)="autoReconcile.set($any($event.target).checked)" />
+        <span>
+          <strong>Auto-reconcile</strong>
+          <small>{{ autoReconcile() ? 'Move nodes into parents automatically' : 'Leave orphan nodes for review' }}</small>
+        </span>
+      </label>
+
+      @if (snapshot(); as current) {
+        <div class="program-card">
+          <div class="program-icon">GO</div>
+          <div>
+            <strong>{{ current.path }}</strong>
+            <small>Working tree active</small>
+          </div>
+        </div>
+        <div class="metric-row">
+          <span>Edits</span><strong>{{ current.edits.length }}</strong>
+        </div>
+        <div class="metric-row">
+          <span>Validity</span><strong [class.bad]="!current.valid">{{ current.valid ? 'Valid' : 'Needs review' }}</strong>
+        </div>
+      }
+    </aside>
+
+    <section class="content">
+      @if (error()) {
+        <div class="error-banner">{{ error() }}</div>
+      }
+
+      @if (snapshot(); as current) {
+        <div class="content-heading">
+          <div>
+            <div class="section-label">EDIT SCRIPT</div>
+            <h2>Review proposed changes</h2>
+          </div>
+          <div class="heading-actions">
+            <div class="view-toggle" role="group" aria-label="Edit detail level">
+              <button class="quiet-button" [class.active-view]="editView() === 'lifted'" (click)="editView.set('lifted')">Lifted AST</button>
+              <button class="quiet-button" [class.active-view]="editView() === 'ast'" (click)="editView.set('ast')">AST</button>
+            </div>
+            <button class="quiet-button" (click)="expandAll()">Expand all</button>
+            <button class="quiet-button" (click)="collapseAll()">Collapse all</button>
+            <span class="count-badge">{{ current.edits.length }} changes</span>
+          </div>
+        </div>
+        <div class="keyboard-hint"><kbd>j</kbd><kbd>k</kbd> move <kbd>Enter</kbd> apply/remove <kbd>Shift</kbd>+<kbd>Enter</kbd> apply/remove line + kids <kbd>S</kbd> apply/remove siblings + kids <kbd>Shift</kbd>+<kbd>L</kbd>/<kbd>H</kbd> expand/collapse</div>
+        @if (editView() === 'lifted') {
+          <div class="lifted-options">
+            <span class="lifted-options-label">Lift shells:</span>
+            @for (option of liftedShellOptions; track option.kind) {
+              <label><input type="checkbox" [checked]="isLiftedShellEnabled(option.kind)" (change)="toggleLiftedShell(option.kind, $any($event.target).checked)" /> {{ option.label }}</label>
+            }
+          </div>
+        }
+
+        <div class="review-grid">
+          <div class="edit-list">
+            @for (edit of visibleEditRows(); track edit.index) {
+              @if (!(editView() === 'lifted' && (edit.nodeKind === '*ast.BlockStmt'))) {
+              <article class="edit-card" [class.applied]="current.status[edit.index] === 'applied' || current.status[edit.index] === 'prepared'" [class.child-edit]="edit.depth > 0" [class.structural-warning]="issuesForEdit(edit.index).length > 0" [class.selected-edit]="isSelectedEdit(edit.index)" [attr.data-edit-index]="edit.index" (click)="selectEdit(edit.index)">
+                <div class="edit-index">
+                  @if (edit.hasChildren) {
+                    <button class="expand-button" (click)="toggleExpandedEdit(edit.index)">{{ expandedEdits()[edit.index] === true ? '−' : '+' }}</button>
+                  } @else {
+                    <span class="tree-branch">└</span>
+                  }
+                  {{ (edit.index + 1).toString().padStart(2, '0') }}
+                </div>
+                <div class="edit-details">
+                  <div class="edit-title">
+                    <span class="edit-kind">{{ edit.kind }}</span>
+                    <strong>{{ edit.nodeKind }}</strong>
+                   </div>
+                   <p>{{ edit.field || 'structural node' }} at position {{ edit.position }}@if (editView() === 'lifted' && (edit.nodeKind === '*ast.FuncDecl' || edit.nodeKind === '*ast.FuncLit')) { <span class="semantic-count">function skeleton · {{ functionEditCount(edit) }} low-level edits</span> } @if (edit.depth > 0) { <span class="dependency">depends on parent</span> } @if (edit.descendantCount > 0) { <span class="descendant-count">{{ edit.descendantCount }} nested</span> }</p>
+                   <div class="ast-relation"><span>{{ edit.field || 'root' }}</span> of {{ parentKind(edit) }}</div>
+                  @for (candidate of candidatesForEdit(edit.index); track candidate.nodeGlobalId) {
+                    <div class="candidate-note">
+                      <label class="candidate-check">
+                        <input type="checkbox" [checked]="candidateSelected(candidate)" (change)="toggleCandidate(candidate, $any($event.target).checked)" />
+                        <span><span class="candidate-mark">↗</span> Reconciliation candidate</span>
+                      </label>
+                      <code>{{ candidate.nodeId }}</code>
+                      <small>Current: {{ candidate.currentPath || candidate.currentParentId || '(orphan)' }}</small>
+                      <small>Intended: {{ candidate.originalPath || candidate.originalParentId || '(root)' }}</small>
+                      <small>{{ candidate.canReconcile ? 'Ready to move into its intended parent.' : (candidate.reason || 'Cannot reconcile yet.') }}</small>
+                      @if (candidate.canReconcile) {
+                        <div class="candidate-actions">
+                          <button class="quiet-button reconcile-button" (click)="reconcile(candidate)">Reconcile node</button>
+                          <button class="quiet-button reconcile-group-button" (click)="reconcileGroup(candidate)">Reconcile this group</button>
+                        </div>
+                      }
+                    </div>
+                  }
+                </div>
+                  <div class="edit-actions">
+                    @if (current.status[edit.index] === 'applied') {
+                      <button class="quiet-button" (click)="removeEdit(edit.index)">Remove</button>
+                      @if (edit.hasChildren) {
+                        <button class="quiet-button subtree-remove" (click)="removeEditSubtree(edit.index)">Remove line + kids</button>
+                      }
+                    } @else {
+                    <button class="quiet-button apply" (click)="applyEdit(edit.index)">Apply</button>
+                    @if (edit.hasChildren) {
+                      <button class="quiet-button subtree" (click)="applyEditSubtree(edit.index)">Apply line + kids</button>
+                    }
+                   }
+                   <button class="quiet-button sibling-action" (click)="toggleEditSiblings(edit.index)">{{ siblingsApplied(edit.index) ? 'Remove siblings + kids' : 'Apply siblings + kids' }}</button>
+                   <span class="edit-status">{{ current.status[edit.index] }}</span>
+                </div>
+              </article>
+              }
+            } @empty {
+              <div class="empty-card">
+                <span class="empty-symbol">∅</span>
+                <h3>No structural edits</h3>
+                <p>Choose another program or create a change between Git revisions.</p>
+              </div>
+            }
+          </div>
+
+          <section class="inspector-panel">
+            <nav class="inspector-tabs" aria-label="Intermediate representation">
+              <button class="inspector-tab" [class.active]="inspectorTab() === 'code'" (click)="inspectorTab.set('code')">Best-effort source</button>
+              <button class="inspector-tab" [class.active]="inspectorTab() === 'ast'" (click)="inspectorTab.set('ast')">JSON AST</button>
+            </nav>
+            <div class="code-heading">
+              <div>
+                <div class="section-label">INTERMEDIATE WORKING STATE</div>
+                <h3>{{ inspectorTab() === 'code' ? 'Best-effort source' : 'Exact current JSON AST' }}</h3>
+              </div>
+              <span class="validity" [class.invalid]="!current.valid">{{ current.valid ? 'valid' : 'intermediate' }}</span>
+            </div>
+            @if (selectedCandidateCount() > 0) {
+              <div class="selected-candidate-bar">
+                <span>{{ selectedCandidateCount() }} reconciliation candidate{{ selectedCandidateCount() === 1 ? '' : 's' }} selected</span>
+                <button class="quiet-button reconcile-selected-button" (click)="reconcileSelected()">Reconcile selected</button>
+              </div>
+            }
+            @if (lastOperation(); as operation) {
+              <div class="operation-summary" [class.no-ast-change]="!operation.astChanged">
+                <strong>{{ operation.label }}@if (operation.editIndex !== undefined) { <span>edit {{ (operation.editIndex + 1).toString().padStart(2, '0') }}</span> }</strong>
+                <span>{{ operation.astChanged ? 'AST changed' : 'AST unchanged' }}</span>
+                <small>{{ operation.sourceChanged ? 'Source changed' : 'Source unchanged: structural change is not renderable yet' }}</small>
+              </div>
+            }
+            @if (inspectorTab() === 'code') {
+              <pre><code [innerHTML]="highlightedWorkingCode()"></code></pre>
+              @if (current.renderDiagnostics?.length) {
+                <div class="render-note">Best effort render: {{ current.renderDiagnostics?.join('; ') }}</div>
+              }
+            } @else {
+              <pre class="json-view"><code>{{ astJson() }}</code></pre>
+              <div class="render-note">This is the exact intermediate tree. Structural warnings identify nodes that are currently outside their intended parent.</div>
+            }
+          </section>
+
+        </div>
+      } @else {
+        <div class="empty-state">
+          <div class="orb">{{ '{' }} {{ '}' }}</div>
+          <div class="section-label">READY WHEN YOU ARE</div>
+          <h2>Open a Go program</h2>
+          <p>Load a directory to compare its current <code>main.go</code> with the previous Git revision.</p>
+        </div>
+      }
+    </section>
+  </section>
+</main>

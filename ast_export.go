@@ -21,20 +21,23 @@ type astJSONNode struct {
 }
 
 type editScriptJSON struct {
-	Index       int    `json:"index"`
-	Kind        string `json:"kind"`
-	ParentIndex int    `json:"parentIndex"`
-	SourceID    string `json:"sourceId,omitempty"`
-	SourceKind  string `json:"sourceKind,omitempty"`
-	TargetID    string `json:"targetId,omitempty"`
-	TargetKind  string `json:"targetKind,omitempty"`
-	Start       int    `json:"start"`
-	End         int    `json:"end"`
-	TargetStart int    `json:"targetStart"`
-	TargetEnd   int    `json:"targetEnd"`
-	Description string `json:"description"`
-	Original    string `json:"original,omitempty"`
-	Replacement string `json:"replacement,omitempty"`
+	Index          int    `json:"index"`
+	Kind           string `json:"kind"`
+	ParentIndex    int    `json:"parentIndex"`
+	SourceID       string `json:"sourceId,omitempty"`
+	SourceGlobalID string `json:"sourceGlobalId,omitempty"`
+	SourceKind     string `json:"sourceKind,omitempty"`
+	TargetID       string `json:"targetId,omitempty"`
+	TargetGlobalID string `json:"targetGlobalId,omitempty"`
+	TargetKind     string `json:"targetKind,omitempty"`
+	ParentGlobalID string `json:"parentGlobalId,omitempty"`
+	Start          int    `json:"start"`
+	End            int    `json:"end"`
+	TargetStart    int    `json:"targetStart"`
+	TargetEnd      int    `json:"targetEnd"`
+	Description    string `json:"description"`
+	Original       string `json:"original,omitempty"`
+	Replacement    string `json:"replacement,omitempty"`
 }
 
 func exportASTDiff(directory string) error {
@@ -178,11 +181,16 @@ func editScriptsJSON(scripts []editScript) []editScriptJSON {
 		}
 		if script.source != nil {
 			item.SourceID = string(script.source.Id)
+			item.SourceGlobalID = string(script.source.Id)
 			item.SourceKind = string(script.source.Label)
 		}
 		if script.target != nil {
 			item.TargetID = string(script.target.Id)
+			item.TargetGlobalID = string(script.target.Id)
 			item.TargetKind = string(script.target.Label)
+			if script.target.Parent != nil {
+				item.ParentGlobalID = string(script.target.Parent.Id)
+			}
 		}
 		result = append(result, item)
 	}

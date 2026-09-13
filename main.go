@@ -11,10 +11,19 @@ import (
 	"interpreter/parser"
 	treeeditdistance "interpreter/treeEditDistance"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
 func main() {
+	if hasArgument(os.Args[1:], "--local") {
+		if err := runLocalWails(); err != nil {
+			panic(err)
+		}
+		return
+	}
+
 	interactive, directory, err := parseArguments(os.Args[1:])
 	if err != nil {
 		panic(err)
@@ -29,6 +38,50 @@ func main() {
 	if err := exportASTDiff(directory); err != nil {
 		panic(err)
 	}
+}
+
+func hasArgument(arguments []string, wanted string) bool {
+	for _, argument := range arguments {
+		if argument == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func runLocalWails() error {
+	wails, err := exec.LookPath("wails")
+	if err != nil {
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			return fmt.Errorf("find wails executable: %w", err)
+		}
+		wails = filepath.Join(home, "go", "bin", "wails")
+		if _, statErr := os.Stat(wails); statErr != nil {
+			return fmt.Errorf("find wails executable: %w", err)
+		}
+	}
+
+	desktopDir, err := filepath.Abs("desktop")
+	if err != nil {
+		return fmt.Errorf("resolve desktop directory: %w", err)
+	}
+
+	build := exec.Command(wails, "build")
+	build.Dir = desktopDir
+	build.Stdin = os.Stdin
+	build.Stdout = os.Stdout
+	build.Stderr = os.Stderr
+	if err := build.Run(); err != nil {
+		return fmt.Errorf("build local Wails app: %w", err)
+	}
+
+	app := exec.Command(filepath.Join(desktopDir, "build", "bin", "desktop"))
+	app.Dir = desktopDir
+	app.Stdin = os.Stdin
+	app.Stdout = os.Stdout
+	app.Stderr = os.Stderr
+	return app.Run()
 }
 
 func parseArguments(arguments []string) (bool, string, error) {

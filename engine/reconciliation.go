@@ -1,119 +1,6 @@
-package main
+package engine
 
-import (
-	"bufio"
-	"fmt"
-	"os"
-	"strconv"
-	"strings"
-)
-
-func runInteractive(directory string) error {
-	diff, err := prepareDirectoryDiff(directory)
-	if err != nil {
-		return err
-	}
-	sourceAST, sourceFileSet, err := parseGoAST(diff.sourceSource)
-	if err != nil {
-		return err
-	}
-	targetAST, targetFileSet, err := parseGoAST(diff.targetSource)
-	if err != nil {
-		return err
-	}
-	edits := simpleASTEditScripts(sourceAST, targetAST, sourceFileSet, targetFileSet)
-	working := structuralASTTree(sourceAST, sourceFileSet)
-	target := structuralASTTree(targetAST, targetFileSet)
-	bindStructuralEditIdentities(working, target, edits)
-	applied := make([]bool, len(edits))
-
-	printInteractiveEdits(edits, applied)
-	printInteractiveAST(working)
-	scanner := bufio.NewScanner(os.Stdin)
-	for {
-		fmt.Print("edit number, q to quit: ")
-		if !scanner.Scan() {
-			break
-		}
-		input := strings.TrimSpace(scanner.Text())
-		if input == "q" || input == "quit" {
-			break
-		}
-		index, err := strconv.Atoi(input)
-		if err != nil || index < 1 || index > len(edits) {
-			fmt.Println("enter a listed edit number or q")
-			continue
-		}
-		editIndex := index - 1
-		if applied[editIndex] {
-			fmt.Println("edit already applied")
-			continue
-		}
-		if err := applyStructuralEdit(working, target, edits[editIndex]); err != nil {
-			fmt.Printf("cannot apply edit %d: %v\n", index, err)
-			continue
-		}
-		applied[editIndex] = true
-		if err := writeJSON("intermediateAst.json", working); err != nil {
-			return err
-		}
-		fmt.Printf("applied edit %d\n", index)
-		printInteractiveAST(working)
-	}
-	return scanner.Err()
-}
-
-func printInteractiveEdits(edits []structuralEdit, applied []bool) {
-	children := make(map[string][]int)
-	knownNodes := make(map[string]bool)
-	for index, edit := range edits {
-		children[edit.ParentID] = append(children[edit.ParentID], index)
-		knownNodes[edit.NodeID] = true
-	}
-	var printEdit func(int, int)
-	printEdit = func(index, depth int) {
-		edit := edits[index]
-		status := " "
-		if applied[index] {
-			status = "x"
-		}
-		fmt.Printf("%s[%s] %d %s at %s[%d]\n", strings.Repeat("  ", depth), status, index+1, edit.Kind+" "+edit.NodeKind, edit.Field, edit.Position)
-		for _, childIndex := range children[edit.NodeID] {
-			printEdit(childIndex, depth+1)
-		}
-	}
-	fmt.Println("AST edits:")
-	for index, edit := range edits {
-		if edit.ParentID == "" || !knownNodes[edit.ParentID] {
-			printEdit(index, 0)
-		}
-	}
-}
-
-func printInteractiveAST(root *structuralASTNode) {
-	if err := writeJSON("intermediateAst.json", root); err != nil {
-		fmt.Printf("cannot write intermediateAst.json: %v\n", err)
-		return
-	}
-	fmt.Println("current intermediate AST written to intermediateAst.json")
-}
-
-type ApplyOptions struct {
-	Reconcile bool
-}
-
-type ReconciliationCandidate struct {
-	NodeID                 string `json:"nodeId"`
-	NodeGlobalID           string `json:"nodeGlobalId"`
-	OriginalParentID       string `json:"originalParentId,omitempty"`
-	OriginalParentGlobalID string `json:"originalParentGlobalId,omitempty"`
-	CurrentParentID        string `json:"currentParentId,omitempty"`
-	CurrentParentGlobalID  string `json:"currentParentGlobalId,omitempty"`
-	OriginalPath           string `json:"originalPath,omitempty"`
-	CurrentPath            string `json:"currentPath,omitempty"`
-	CanReconcile           bool   `json:"canReconcile"`
-	Reason                 string `json:"reason,omitempty"`
-}
+import "fmt"
 
 func applyStructuralEdit(working, target *structuralASTNode, edit structuralEdit) error {
 	return applyStructuralEditWithOptions(working, target, edit, ApplyOptions{Reconcile: true})
@@ -163,13 +50,39 @@ func applyStructuralEditWithOptions(working, target *structuralASTNode, edit str
 		insertIndex = structuralInsertPosition(working, parent, targetNode.parent, targetNode)
 	}
 	insertStructuralNode(parent, child, insertIndex)
+	seedStructuralSlots(working, child, targetNode)
 	if options.Reconcile {
 		attachStructuralDescendants(working, target, targetNode)
 	}
 	return nil
 }
 
-func ReconciliationCandidates(working, target *structuralASTNode, ancestorID string) []ReconciliationCandidate {
+// seedStructuralSlots creates the empty shape required for a construct. The
+// edit script still supplies the slot contents as independent edits.
+func seedStructuralSlots(working, node, target *structuralASTNode) {
+	if node == nil || target == nil {
+		return
+	}
+	var fields []string
+	switch node.Kind {
+	case "*ast.FuncDecl", "*ast.FuncLit":
+		fields = []string{"Type", "Body"}
+	case "*ast.IfStmt":
+		fields = []string{"Cond", "Body"}
+	default:
+		return
+	}
+	for _, field := range fields {
+		if child := childForField(target, field); child != nil {
+			if findGlobalOrPath(working, child.GlobalID, child.ID) != nil {
+				continue
+			}
+			insertStructuralNode(node, shallowStructuralNode(child), len(node.Children))
+		}
+	}
+}
+
+func reconciliationCandidates(working, target *structuralASTNode, ancestorID string) []ReconciliationCandidate {
 	ancestor := target.find(ancestorID)
 	if ancestor == nil {
 		return nil
@@ -204,7 +117,7 @@ func ReconciliationCandidates(working, target *structuralASTNode, ancestorID str
 	return candidates
 }
 
-func ApplyReconciliationCandidate(working, target *structuralASTNode, candidate ReconciliationCandidate) error {
+func applyReconciliationCandidate(working, target *structuralASTNode, candidate ReconciliationCandidate) error {
 	targetNode := findGlobalOrPath(target, candidate.NodeGlobalID, candidate.NodeID)
 	if targetNode == nil {
 		return fmt.Errorf("target node %s is missing", candidate.NodeID)
@@ -221,6 +134,35 @@ func ApplyReconciliationCandidate(working, target *structuralASTNode, candidate 
 	}
 	attachStructuralNode(working, current, targetNode, targetNode.parent)
 	return nil
+}
+
+func normalizeAppliedStructure(working, target *structuralASTNode, edits []structuralEdit, statuses []EditStatus) {
+	for pass := 0; pass < len(edits)+1; pass++ {
+		changed := false
+		for index, edit := range edits {
+			if statuses[index] != EditApplied || edit.Kind == "DELETE" {
+				continue
+			}
+			targetNode := findTargetEditNode(target, edit)
+			current := findWorkingEditNode(working, edit)
+			if targetNode == nil || current == nil || targetNode.parent == nil {
+				continue
+			}
+			parent := findStructuralNode(working, targetNode.parent)
+			if parent == nil {
+				continue
+			}
+			oldParent := current.parent
+			oldField, oldIndex := current.Field, current.Index
+			attachStructuralNode(working, current, targetNode, targetNode.parent)
+			if current.parent != oldParent || current.Field != oldField || current.Index != oldIndex {
+				changed = true
+			}
+		}
+		if !changed {
+			return
+		}
+	}
 }
 
 func resolveStructuralNode(working, target *structuralASTNode) *structuralASTNode {
@@ -351,12 +293,12 @@ func structuralInsertPosition(working, parent, targetParent, targetNode *structu
 }
 
 func attachStructuralDescendants(working, target, targetNode *structuralASTNode) {
-	current := working.find(targetNode.ID)
+	current := findStructuralNode(working, targetNode)
 	if current == nil {
 		return
 	}
 	for _, targetChild := range targetNode.Children {
-		if child := working.find(targetChild.ID); child != nil {
+		if child := findStructuralNode(working, targetChild); child != nil {
 			attachStructuralNode(working, child, targetChild, targetNode)
 			attachStructuralDescendants(working, target, targetChild)
 		}

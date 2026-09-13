@@ -1,4 +1,4 @@
-package main
+package engine
 
 import (
 	"fmt"
@@ -311,17 +311,18 @@ func linkStructuralIdentities(source, target *structuralASTNode) {
 	if source == nil || target == nil {
 		return
 	}
-	if source.ID == target.ID && source.Kind == target.Kind {
+	if source.Kind == target.Kind {
 		target.GlobalID = source.GlobalID
 	}
+	usedSource := make([]bool, len(source.Children))
 	for _, targetChild := range target.Children {
-		if sourceChild := source.find(targetChild.ID); sourceChild != nil && sourceChild.Kind == targetChild.Kind {
-			targetChild.GlobalID = sourceChild.GlobalID
-		}
-	}
-	for _, child := range target.Children {
-		if sourceChild := source.find(child.ID); sourceChild != nil {
-			linkStructuralIdentities(sourceChild, child)
+		for sourceIndex, sourceChild := range source.Children {
+			if usedSource[sourceIndex] || sourceChild.Field != targetChild.Field || sourceChild.Kind != targetChild.Kind {
+				continue
+			}
+			usedSource[sourceIndex] = true
+			linkStructuralIdentities(sourceChild, targetChild)
+			break
 		}
 	}
 }

@@ -2,183 +2,178 @@
 
 ## Mission
 
-`contuts` is a directed program-transformation environment.
+`contuts` is a directed code-exploration and program-transformation
+environment. It should help a person understand how code relates, ask focused
+questions about it, and deliberately move the working program from one state
+to another.
 
-The human chooses the target state of the codebase. AI helps construct transformations toward that state. `contuts` makes those transformations concrete, visible, reversible, and controllable.
+The product is not a fixed tree, a two-pane dependency viewer, or an opaque AI
+patch generator. It is a sequence of visible questions over a working codebase.
 
-The product is not primarily about summarizing AI output or recovering AI intent. Neither is reliably possible. The product is about controlling the transition from one program state to another.
+## The Inquiry Path
 
-## The Core Distinction
-
-There is a major difference between these two workflows:
-
-```text
-Ask AI for a program
-    -> receive a large patch
-    -> receive a summary
-    -> try to understand what happened
-```
-
-and:
+The primary interaction is an unbounded path of identical explorer columns:
 
 ```text
-Choose a target state
-    -> direct the next transformation
-    -> inspect the edits being materialized
-    -> accept, reject, or alter them
-    -> observe the resulting state
+column 0: starting program or selected edit
+    -> column 1: imported package
+        -> column 2: selected file
+            -> column 3: declaration
+                -> column 4: callers, callees, dependents, or impact
 ```
 
-The second workflow is the direction of the project.
+The first column is the user's starting point. Each later column exists because
+the user asked a question from the previous column. The rightmost column is
+always available for the next question.
 
-The human does not need to understand the AI's private reasoning. The human needs to control what transformation is attempted and what state becomes current.
+A column is a reusable explorer, not a special-purpose result panel. It should
+be able to show the same package, file, declaration, source, import, API, and
+relationship views regardless of how it was opened.
 
-## Human Authority
+The path must preserve context:
 
-AI may be more capable than the human at implementation. It is still below the human in authority.
+- Highlight the source item that caused the next column to open.
+- Highlight the selected answer in the new column.
+- Show the relationship type, such as `imports`, `calls`, `used by`, or
+  `affected by`.
+- Keep the starting column visible while exploring to the right.
+- Allow returning to an earlier column without losing the path.
+
+## Cycles And Separate Questions
+
+Code relationships are not guaranteed to form a tree. They can contain cycles,
+shared dependencies, and repeated references.
+
+The first useful behavior is not to invent a complex graph UI. It is to make
+the path honest:
 
 ```text
-Human: chooses the target and constraints
-AI: proposes or performs bounded implementation work
-contuts: materializes and exposes the transformation
-Human: decides whether the next state is accepted
+target already exists earlier in this path
+Previously opened at column 2
+Open again anyway | Return to existing column
 ```
 
-The AI must not silently mutate the working state. “Fix this” should produce a proposed transformation. The user must be able to say yes, no, or do it differently.
+If the user asks an unrelated question, create a separate inquiry path or row.
+Do not make unrelated files appear to be part of the current explanation.
 
-## The Transformation Model
+## Relationship Facts
 
-The first model should be concrete rather than a general-purpose rule language.
+The engine should expose relationships as facts with explicit confidence and
+origin where needed:
+
+```text
+import      -> this file imports that package
+reference   -> this identifier resolves to that declaration
+call        -> this function calls that function
+dependent   -> this package or file uses the selected declaration
+impact      -> this code may observe the selected change
+```
+
+These claims must stay separate from interpretation:
+
+```text
+AST diff        -> syntax changed
+References      -> definitions and uses
+Call analysis   -> callers and callees
+Type analysis   -> type observations
+Impact analysis -> possible affected code
+Human label     -> an explicitly chosen interpretation
+```
+
+The tool may help the user explore relationships. It must not claim that a
+generated graph is the true architecture of the system.
+
+## Edit Evolution
+
+The dependency path and edit history should meet at the selected code. When a
+user explores an edit, show the relevant sequence from broad operation to
+concrete consequence:
+
+```text
+operation
+    -> parent edit
+        -> child edit
+            -> affected declaration
+                -> related file or package
+                    -> resulting source and diagnostics
+```
+
+This is a linear story only for related work. Unrelated edits are excluded from
+the story and shown in another lane or explorer.
+
+An edit operation records:
+
+- Input working-state revision.
+- Selected node or subtree.
+- Origin and current instance identity.
+- Destination and insertion mode.
+- Explicit substitutions or renames.
+- Materialized low-level edits.
+- Output working-state revision.
+- Diagnostics produced by the new state.
+- Relationships discovered from the changed code.
+
+A high-level operation is only a grouping. Each materialized edit can be
+applied, removed, inspected, or changed independently. Applying an edit should
+update the working state and refresh the visible related-code path.
+
+## Human Authority And AI
+
+The human chooses the starting point, question, constraints, and accepted
+working state. AI can help locate a node, propose an edit, or explain an
+observation.
+
+```text
+human chooses a target or question
+    -> AI proposes bounded work
+        -> contuts exposes relationships and concrete edits
+            -> human accepts, rejects, or changes the work
+                -> continue from the chosen state
+```
+
+There must be no hidden AI edit path. A model's explanation is not evidence of
+intent. The system should distinguish observed facts, AI hypotheses, requested
+transformations, and verified results.
+
+## Structural Core
+
+The UI is a view over an authoritative structural engine. The initial operations
+remain deliberately concrete:
 
 ```text
 select(anchor)
 capture(subtree)
-duplicate(subtree, destination)
 replace(target, subtree)
 move(target, destination)
 wrap(target, wrapper)
-delete(target)
 substitute(edit, explicit bindings)
 preview(edit)
 apply(edit)
 remove(edit)
 ```
 
-The input and output of an operation are working-state revisions. An operation should record:
+The engine should preserve source fragment, AST structure, provenance,
+destination, substitutions, before state, after state, and the operation that
+produced each edit.
 
-- Input working-state revision.
-- Selected node or subtree.
-- Destination and insertion mode.
-- Explicit substitutions or renames.
-- Materialized low-level edits.
-- Output working-state revision.
-- Diagnostics produced by the new state.
+AST pointers and list indexes are not durable identities. Mutations can rebuild
+parents and shift positions. Every working occurrence needs an instance
+identity, while copied code retains provenance to its origin. Stale or
+ambiguous anchors become pending or conflicted; they are never silently moved
+to a merely similar location.
 
-The operation makes no claim that behavior or intent is correct. It records what was requested and what was structurally produced.
+## Intermediate States
 
-## Concrete Replication
-
-Replication is a central use case.
-
-The user selects:
-
-```go
-if err != nil {
-    return err
-}
-```
-
-Then selects target locations in several functions. The system expands the request into separate instances:
-
-```text
-Transform: repeat selected IfStmt
-
-Instance 1: insert into foo.Body[2]
-Instance 2: insert into bar.Body[4]
-Instance 3: insert into baz.Body[1]
-```
-
-The transform is a convenient parent. Each instance is an ordinary concrete edit with its own:
-
-- Target.
-- Substitutions.
-- Before and after source.
-- Diagnostics.
-- Applied or rejected status.
-- Provenance back to the selected fragment.
-
-The user can apply instances 1 and 3, reject instance 2, and continue. A bulk operation must never hide partial success.
-
-## Explicit Substitution And Renaming
-
-Copied code must not be silently adapted.
-
-When a selected fragment contains `err`, the target may contain `err`, `parseErr`, another value, or no suitable value. The system may detect collisions and suggest choices, but the mapping must be visible and explicit:
-
-```text
-source binding: err
-target function: ParseFile
-available candidates: err, parseErr
-selected mapping: err -> parseErr
-```
-
-The initial system should support concrete substitutions and capture holes without requiring the user to author a formal template:
-
-```text
-selected fragment
-    -> mark this expression as a hole
-    -> fill it with a selected target node
-    -> preview the concrete result
-```
-
-Semantic equivalence must not be assumed. A type-compatible rename is still a human decision.
-
-## Placement
-
-A destination is a concrete structural location, not a vague pattern.
-
-The user should be able to choose:
-
-- Insert before a node.
-- Insert after a node.
-- Prepend or append to a list.
-- Replace a node.
-- Wrap a node.
-- Move a node to another parent.
-
-Target queries may eventually select many locations, but the complete target set must be shown before application. The first implementation should prioritize manually selected destinations because they are easier to reason about and test.
-
-## AI As A Subordinate Operator
-
-AI is useful for finding and proposing transformations:
-
-```text
-compiler error or user request
-    -> likely line or node
-    -> user opens the relevant structure
-    -> AI proposes a bounded transform
-    -> user invokes or changes it
-    -> contuts materializes the edits
-```
-
-For example, AI may identify a likely error node and suggest replacing one expression. It must not silently repair unrelated code or claim that its interpretation of the problem is true.
-
-All AI-generated work must enter the same transformation system as human-created work. There should be no hidden AI edit path.
-
-## Intermediate And Wrong States
-
-Invalid states are part of directed construction.
-
-The user may intentionally create:
+Wrong and incomplete states are part of exploration:
 
 - An incomplete declaration.
 - A missing expression.
-- A type mismatch.
 - An unresolved identifier.
-- A function in the wrong package.
+- A type mismatch.
 - A broken import relationship.
+- A declaration in the wrong package.
 
-The system should preserve and display these states. It should attach observations rather than erase the state:
+The tool should preserve these states and attach observations:
 
 ```text
 Structural state: incomplete
@@ -188,99 +183,66 @@ Tests: not run
 AI suggestion: replace this expression
 ```
 
-These categories must remain separate:
+A failed transformation, invalid structure, type failure, build failure, test
+failure, and disagreement with an AI proposal are different events.
 
-- The transformation could not be materialized.
-- The resulting structure is incomplete or invalid.
-- The code parses but fails type checking.
-- The code builds but tests fail.
-- The AI proposal differs from the user's preference.
+## Implementation Order
 
-## Identity And Repetition
+The next UI architecture should be small and composable:
 
-AST pointers and numeric indexes are not durable identities. Mutations can rebuild parents and shift list positions.
+1. Extract one `ExplorerColumnComponent` from the current explorer markup.
+2. Give a column its own target, selection, lens, source, and history state.
+3. Render an array of columns instead of hard-coding primary and secondary panes.
+4. Append a column when the user selects a relationship.
+5. Preserve the originating selection and label the relationship edge.
+6. Detect repeated targets and offer the existing column or an explicit reopen.
+7. Add separate inquiry rows for unrelated questions.
+8. Connect selected edits to affected-code relationships.
+9. Render related parent-to-child edit evolution below the inquiry path.
+10. Add deeper reference, call, type, and impact analysis only when it improves
+    a real question.
 
-The system needs explicit lineage and working-tree instance identity:
-
-```text
-origin: where the selected fragment came from
-instance: this occurrence in the current working state
-```
-
-A copied subtree receives a new instance identity while retaining provenance to its source. An edit also records its working-state revision and structural anchor.
-
-If an anchor becomes stale or ambiguous, the edit becomes pending or conflicted. It must not be silently moved to a location that merely appears similar.
-
-## Source Fidelity
-
-The AST should be the structural transformation surface, but source remains the user-facing artifact.
-
-The system should preserve untouched source bytes where possible and render only changed structural regions. Comments, formatting, and generated code need explicit policies. A source-text fallback may exist, but it must be labeled as a text operation rather than presented as a structurally safe transformation.
-
-## Views
-
-The user should be able to move between levels without losing the underlying edits:
-
-```text
-folder
-    -> package
-        -> file
-            -> declaration
-                -> AST node
-                    -> token or field
-```
-
-Higher-level views are navigation and targeting surfaces. They are not authoritative summaries of what a change means. Every high-level operation must expand to visible low-level edits.
+Do not start by building a formal graph editor. The path should earn graph
+features through use.
 
 ## What Not To Build First
 
-Do not begin with:
-
-- AI-generated summaries as the primary experience.
-- A formal transformation language.
+- A two-pane limit.
+- A special imported-source screen that duplicates explorer behavior.
+- A graph that claims to know the user's architecture.
 - Automatic intent inference.
-- Automatic application to every similar location.
-- Silent binding or rename decisions.
-- Semantic-preservation claims.
+- Silent substitutions or renames.
+- Automatic edits at every similar location.
+- AI-generated summaries as the primary experience.
 - Hidden AI mutations.
 - Mandatory validity gates.
-- A graph that pretends to be the user's architecture.
-
-These may become useful later, but they should earn their place by reducing the cost of directed transformation.
-
-## Minimal Useful Experiment
-
-Build one complete vertical slice:
-
-1. Select a real AST subtree.
-2. Capture it without losing provenance.
-3. Select one or more concrete destinations.
-4. Duplicate it into those destinations.
-5. Show one independent materialized edit per destination.
-6. Allow explicit substitutions and renames.
-7. Preview before and after source.
-8. Apply or reject each instance independently.
-9. Permit invalid intermediate states.
-10. Undo and continue from the chosen state.
-
-The first demonstration should be a user copying a newly created `if` statement into several functions, changing the relevant identifier in each copy, and watching the program move through visible working states.
+- A formal transformation language before concrete transformations work.
 
 ## Product Test
 
-The product is working when a user can say:
+The product is working when a user can start from a changed declaration and
+ask:
 
 ```text
-Put the program in this state.
-Use AI to help construct the next transformation.
-Show me every edit it creates.
-No. Keep this part and change that part.
-Now continue from the state I chose.
+What imports this?
+What does it call?
+Who depends on it?
+What else is affected by this edit?
+Show me the related edit evolution.
+Keep this part, remove that part, and continue from the resulting state.
 ```
 
-The product is not working if it only produces a persuasive summary after an opaque rewrite.
+The answer should be an explorable, honest path through code and concrete edits,
+not a persuasive paragraph disconnected from the working program.
 
 ## Current Reality
 
-The current repository is not this product yet. It is an AI-built, partially understood AST and working-state experiment. That makes it an appropriate place to explore the problem, but not evidence that the problem has been solved.
+The repository is still an experimental AST and working-state prototype. It
+already has useful parsing, structural edit, package, file, and import
+mechanics, but its Angular UI is being reorganized from special-cased panes to
+reusable columns. Reference, call, type, impact, and durable branching support
+remain future work.
 
-The project should keep the mechanics only if they lead to a better directed construction loop. Otherwise, we should be willing to call the experiment a gimmick and stop pretending that more AST controls alone will create value.
+The project should keep mechanics that help a person understand and direct a
+working state. If more controls do not improve that loop, the project should be
+willing to call the experiment a gimmick and change direction.

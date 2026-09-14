@@ -1,226 +1,231 @@
 # contuts
 
-`contuts` is an exploratory project for directing AI-assisted construction of a codebase.
+`contuts` is an exploratory code-understanding and program-transformation tool.
+It is being built around one question:
 
-The human chooses the target state. AI helps find and build the path toward it. The system exposes the concrete transformations along the way so the human can apply, reject, repeat, alter, or undo them.
+> Can a person understand and direct code changes by exploring the code state,
+> the relationships around it, and the concrete edits that move it forward?
 
-This is not primarily a code summary tool. It is not an attempt to recover the true intent of an AI-generated change. Intent is not reliably observable. A model's explanation is a claim, not a fact.
+The project is intentionally being built as a bad, useful version first. The
+goal is not to predict the perfect architecture before using the tool. The goal
+is to discover an interaction that makes code evolution easier to see.
 
-The product we are looking for is a way to say:
+## The Core Experience
 
-```text
-Create this file.
-Add this function here.
-Take this if statement and put it in these functions.
-Rename this value in that copy.
-Let me see the exact edits as they are built.
-```
-
-## The Mission
-
-AI can be faster and more capable than the person directing it. That does not make AI the owner of the product.
-
-The human owns the target state and the sequence of decisions. AI is a subordinate planner and operator. It may propose a transformation or locate a likely error, but it should not silently decide what becomes part of the codebase.
+The main UI is an inquiry path made from identical explorer columns:
 
 ```text
-Human chooses a target
-        |
-        v
-AI proposes a concrete transformation
-        |
-        v
-Human selects, changes, or rejects it
-        |
-        v
-contuts materializes visible edits
-        |
-        v
-The program enters a new working state
-        |
-        v
-Human chooses the next target
+starting code
+    -> imported package
+        -> file
+            -> declaration
+                -> callers, callees, dependents, or related code
 ```
 
-The goal is not to make the human approve every token. The goal is to keep the human first in the causal chain of program construction.
+The path is not limited to two columns. The leftmost column is the starting
+point. Every question opens another copy of the same explorer to the right.
+Selecting an import, dependent, caller, callee, or affected declaration extends
+the path rather than replacing the current context.
 
-## An Honest Status Report
+Every column should support the same lenses:
 
-This repository is a gimmick today. It is also a serious exploratory experiment into whether a better interaction is possible.
+- Packages and files.
+- Declarations and exported API.
+- Source code.
+- Imports and references.
+- Callers and callees when analysis is available.
+- Dependents and affected code when analysis is available.
+- Structural AST details and exact edit context.
 
-Much of this codebase was built by AI as a black box. That is ironic because the black-box relationship is the problem this project is trying to fix. The current code proves interesting AST and working-state mechanics, but it is not yet the directed construction product described here.
+The user should always be able to tell why a column exists. The originating
+item remains highlighted, and the selected item in the next column is
+highlighted as the answer to that question.
 
-The current UI exposes too much low-level machinery without a sufficiently useful construction loop. We should not pretend that displaying AST edits automatically gives a human control over architecture, behavior, or AI intent.
+Loops are expected in real code. A repeated target should be marked as
+`Previously opened` instead of silently creating a confusing cycle. Unrelated
+questions should start a separate inquiry path or explorer row rather than
+polluting the current one.
 
-The project is valuable only if the mechanics become useful for directing transformations. If they do not, this remains a gimmick and ordinary agents, Git, tests, and an editor are better tools.
+## Edit Evolution
 
-## Directed Transformations
+Dependency exploration and edit exploration are connected, but they are not
+the same view.
 
-The basic unit is a concrete transformation, not a summary.
-
-Suppose the user selects this real piece of code:
-
-```go
-if err != nil {
-    return err
-}
-```
-
-The user chooses three destination functions. `contuts` expands the request into three independently visible operations:
+When edits are applied, the tool should show the relevant evolution as a clear
+sequence:
 
 ```text
-1. Insert this IfStmt into foo.Body[2]
-2. Insert this IfStmt into bar.Body[4]
-3. Insert this IfStmt into baz.Body[1]
+parent edit
+    -> child edit
+        -> affected declaration
+            -> resulting source
+                -> next related change
 ```
 
-Each result can be applied, rejected, moved, renamed, or undone independently.
+The sequence should follow the related parent-to-child chain. Completely
+unrelated edits should not appear in the current story; they belong in another
+edit lane or inquiry path.
 
-The initial transformation model should be deliberately concrete:
+Each edit remains independently controllable. A parent operation is only a
+convenient grouping. The materialized child edits are the actual operations and
+can be applied, removed, inspected, or changed separately.
+
+## Human Direction, AI Leverage
+
+The human chooses the target state and the next question. AI can locate code,
+propose a transformation, or explain an observed relationship, but it must not
+silently decide what becomes part of the working state.
 
 ```text
-select a real node or subtree
-capture that fragment
-choose a destination
-duplicate, replace, move, wrap, or delete
-make substitutions explicitly
-preview the resulting edits
-apply or reject the operation
+Human chooses a target or question
+        |
+        v
+AI proposes a bounded operation or analysis
+        |
+        v
+contuts shows the relationship and concrete edits
+        |
+        v
+Human accepts, rejects, changes, or continues the inquiry
+        |
+        v
+The working program enters a chosen state
 ```
 
-Generalized templates and pattern rules may come later. The user should not need to design a transformation language just to repeat a piece of code.
+The product is not primarily an AI summary viewer. A summary is a claim. The
+useful artifact is the visible path from one program state to another:
 
-## AI As A Subordinate Operator
-
-AI can locate a likely error or propose a repair:
-
-```text
-Compiler reports an error at line 18
-        |
-        v
-AI points to a likely AST node
-        |
-        v
-contuts shows the node and its context
-        |
-        v
-AI proposes a bounded transformation
-        |
-        v
-Human says yes, no, or do it differently
-```
-
-The proposal must remain inert until the human invokes it. A model saying “I fixed it” is not evidence that the problem was fixed. The system should show:
-
-- The source location or node involved.
-- The exact transformation proposed.
-- Every low-level edit it would create.
-- The resulting working state.
+- The source location or structural node.
+- The relationship that caused it to be shown.
+- The exact edit or proposed edit.
+- The resulting working source.
 - Diagnostics and verification results.
-
-It must distinguish observed facts, AI hypotheses, and verified outcomes. It must not claim to know what the AI really intended.
+- Provenance back to the original fragment and operation.
 
 ## Current Prototype
 
-The codebase currently contains:
+The repository currently contains experiments for:
 
 - Go AST export and field-aware structural diffs.
-- Low-level insert, update, delete, and reconciliation experiments.
+- Low-level insert, update, delete, and reconciliation operations.
 - A mutable intermediate working tree.
 - Reversible application and removal of edits.
 - Best-effort rendering of incomplete states.
-- A Wails desktop UI for exploring structural edits.
+- Package, file, declaration, and local-import exploration.
+- A Wails desktop UI.
 - Lifted views over some low-level AST operations.
 - Structural error markers for incomplete representations.
+- A multi-package Go fixture for dependency exploration.
 
-These are foundations, not proof of the final product. The current implementation is mainly a single-file Go structural editing experiment. It does not yet provide reliable multi-file transformations, AI proposal integration, durable branches, or the full directed workflow.
+This is not yet a dependable multi-file transformation environment. Reference,
+call, type, and impact analysis are future capabilities. The current UI is a
+prototype and is being reshaped around reusable explorer columns rather than
+special-cased left and right panes.
+
+## Structural Transformation Model
+
+The first transformation model should stay concrete:
+
+```text
+select(anchor)
+capture(subtree)
+replace(target, subtree)
+move(target, destination)
+wrap(target, wrapper)
+substitute(edit, explicit bindings)
+preview(edit)
+apply(edit)
+remove(edit)
+```
+
+AST pointers and numeric indexes are not durable identities. Operations need
+lineage, working-state revisions, structural anchors, and provenance. A copied
+subtree receives a new instance identity while retaining its origin.
+
+The system must distinguish:
+
+```text
+AST diff        -> syntax changed
+References      -> definitions and uses
+Call analysis   -> callers and callees
+Type analysis   -> type observations
+Impact analysis -> code that may observe the change
+```
+
+None of these observations should pretend to be the user's architecture or the
+true intent of an AI system.
 
 ## Why Invalid States Matter
 
-The user should be allowed to construct a program in a wrong or incomplete state.
+The user may intentionally create an incomplete or wrong state in order to
+understand it:
 
 ```text
 Create the file.
 Create the declaration.
 Leave the function incomplete.
-Add the wrong type on purpose.
 See what breaks.
-Ask AI for a repair.
+Ask for a bounded repair.
 Apply only the repair chosen by the human.
 ```
 
-Compilation, parsing, type checking, and tests are observations about a state. They should inform the next decision, not erase the state or prevent exploration unless the user explicitly asks for a constraint.
+Parsing, compilation, type checking, and tests are observations about a state.
+They should inform the next question instead of erasing the state.
 
-## Source, Structure, And Edits
+## Running It
 
-The AST is the transformation substrate. Source is the human-facing result. Every high-level operation must expand into concrete, inspectable edits.
-
-The system should preserve:
-
-- The selected source fragment.
-- Its structural representation.
-- Its original provenance.
-- Its destination.
-- Explicit substitutions and renames.
-- The before and after state.
-- The operation that produced each edit.
-
-A high-level row such as `repeat selected IfStmt in 3 functions` is only a convenient parent operation. The three materialized edits underneath it are the real result.
-
-## Future Views
-
-The product may eventually work from:
-
-```text
-folders -> packages -> files -> declarations -> AST nodes
-```
-
-This is not because a generated graph can tell us what the architecture truly means. It is because users may want to direct a transformation at the folder, package, file, declaration, or node level.
-
-Every view must lead to the same working state and the same concrete edit history. A higher-level view may organize edits, but it must not hide or silently rewrite them.
-
-## Running The Prototype
+Run the Go prototype:
 
 ```bash
 go run .
 go run . --interactive
-go build .
 go test ./...
 ```
 
-Build the desktop application:
+Build or test the desktop application:
 
 ```bash
 cd desktop
+go test ./...
 wails build
 ```
 
-The default example uses `TestProgram/main.go`. A repository directory can be supplied to compare its working-tree `main.go` with `HEAD~1`.
+The default example uses `TestProgram/main.go`. `TestProgramCalorieApp/` is a
+multi-package fixture for exploring package and import relationships.
 
 ## Principles
 
-- The human owns the target state.
+- The human owns the target state and the starting point of an inquiry.
+- Every explorer column uses the same code and behavior.
+- A question extends to the right; it does not destroy the question that led to it.
+- Previously opened targets must be visible when loops occur.
+- Unrelated code belongs in a separate path or lane.
 - AI may propose, but does not own execution.
-- A transformation is more important than its summary.
-- Every meaningful operation must materialize into visible edits.
+- Every meaningful operation materializes into visible edits.
 - Repetition creates independently controllable edit instances.
-- Renames and substitutions must be explicit.
+- Renames and substitutions are explicit.
 - Invalid intermediate states are allowed.
 - Diagnostics are evidence, not authority.
-- AI intent is a claim, never a fact.
-- High-level views must remain connected to low-level edits.
-- Operations must be inspectable, reversible, and replayable.
+- Operations are inspectable, reversible, and replayable.
+- High-level views remain connected to low-level edits.
 - The project must be honest about what it cannot know.
 
-## The Product Test
+## Product Test
 
 The product is moving in the right direction when a user can say:
 
 ```text
-Put the program in this state.
-Use AI to help build the next step.
-Show me exactly what it did.
-No, keep this part and change that part.
-Now continue from the state I chose.
+Start here.
+Why does this depend on that?
+Show me the next code in the path.
+What does this edit affect?
+Show me the edit evolution.
+Keep this change, remove that one, and continue from here.
 ```
 
-That is the product we are searching for. The current repository is only the beginning.
+If the user can see the code, the relationships, and the chosen working states
+well enough to ask better questions, contuts is doing useful work.
+
+The older project notes are preserved in [`oldREADME.md`](oldREADME.md),
+[`oldDIRECTION.md`](oldDIRECTION.md), and
+[`INTERFACE_IDEAS.md`](INTERFACE_IDEAS.md).

@@ -83,10 +83,10 @@ Human label     -> an explicitly chosen interpretation
 The tool may help the user explore relationships. It must not claim that a
 generated graph is the true architecture of the system.
 
-## Edit Evolution
+## Edit Evolution And Line Of Sight
 
 The dependency path and edit history should meet at the selected code. When a
-user explores an edit, show the relevant sequence from broad operation to
+user explores an edit, show the relevant line of sight from broad operation to
 concrete consequence:
 
 ```text
@@ -116,6 +116,33 @@ An edit operation records:
 A high-level operation is only a grouping. Each materialized edit can be
 applied, removed, inspected, or changed independently. Applying an edit should
 update the working state and refresh the visible related-code path.
+
+The point is not merely to catch bad AI output. Even when every proposed edit
+is accepted, the user should be able to walk through how the program evolved:
+
+```text
+AI proposal
+    -> parent AST edit
+        -> child edit
+            -> changed declaration
+                -> affected type or reference
+                    -> next working revision
+```
+
+Rejecting or changing a child creates a new branch from the current working
+state. Applying an edit is both a user authorization and an observation of the
+next state. The system should preserve a causal thread for each step:
+
+- Edit and parent edit identity.
+- Source and destination AST identities.
+- Before and after state.
+- Affected declarations and relationships.
+- Working-state revision.
+- Diagnostics and verification results.
+
+The UI should distinguish `changed directly`, `referenced by`, `potentially
+affected`, and `verified by tests`. A line of sight is an evidence chain, not a
+claim that every nearby part of the codebase is impacted.
 
 ## Human Authority And AI
 
@@ -202,6 +229,11 @@ The next UI architecture should be small and composable:
 10. Add deeper reference, call, type, and impact analysis only when it improves
     a real question.
 
+The immediate development focus is the UI. The engine work already in the
+repository is foundational and will take time to understand. The interface
+should first become a useful instrument for steering and observing the existing
+engine rather than requiring the whole engine to be redesigned at once.
+
 Do not start by building a formal graph editor. The path should earn graph
 features through use.
 
@@ -233,7 +265,9 @@ Keep this part, remove that part, and continue from the resulting state.
 ```
 
 The answer should be an explorable, honest path through code and concrete edits,
-not a persuasive paragraph disconnected from the working program.
+not a persuasive paragraph disconnected from the working program. The user
+should be able to follow the evolution even when they agree with the AI, and
+intervene at any point when they do not.
 
 ## Current Reality
 
@@ -245,4 +279,6 @@ remain future work.
 
 The project should keep mechanics that help a person understand and direct a
 working state. If more controls do not improve that loop, the project should be
-willing to call the experiment a gimmick and change direction.
+willing to call the experiment a gimmick and change direction. There are no
+promises yet; the UI is the place to steer the experiment and discover whether
+the line of sight through code evolution is genuinely useful.

@@ -51,8 +51,8 @@ polluting the current one.
 Dependency exploration and edit exploration are connected, but they are not
 the same view.
 
-When edits are applied, the tool should show the relevant evolution as a clear
-sequence:
+When edits are proposed or applied, the tool should show the relevant evolution
+as a clear line of sight:
 
 ```text
 parent edit
@@ -69,6 +69,35 @@ edit lane or inquiry path.
 Each edit remains independently controllable. A parent operation is only a
 convenient grouping. The materialized child edits are the actual operations and
 can be applied, removed, inspected, or changed separately.
+
+The value is not dependent on rejecting AI work. Even if the user applies every
+proposal, walking through each transition makes the change understandable:
+
+```text
+AI proposal
+    -> parent AST edit
+        -> child edit
+            -> changed declaration
+                -> affected type or reference
+                    -> next working revision
+```
+
+If the user rejects or changes a child, the next revision branches from the
+state they chose. Applying an edit is therefore both an authorization and a way
+to observe the next program state.
+
+Every edit should eventually retain a causal thread:
+
+- Edit and parent edit identity.
+- Source and destination AST identities.
+- Before and after state.
+- Affected declarations and relationships.
+- Working-state revision.
+- Diagnostics and verification results.
+
+The UI should present direct changes, related references, potential effects, and
+verified results as different kinds of evidence. It should not collapse them
+into an unqualified claim that an entire subsystem is affected.
 
 ## Human Direction, AI Leverage
 
@@ -120,7 +149,9 @@ The repository currently contains experiments for:
 This is not yet a dependable multi-file transformation environment. Reference,
 call, type, and impact analysis are future capabilities. The current UI is a
 prototype and is being reshaped around reusable explorer columns rather than
-special-cased left and right panes.
+special-cased left and right panes. The near-term work is intentionally in the
+UI: make the exploration path and edit evolution useful before attempting to
+fully understand or replace the engine internals.
 
 ## Structural Transformation Model
 
@@ -224,7 +255,9 @@ Keep this change, remove that one, and continue from here.
 ```
 
 If the user can see the code, the relationships, and the chosen working states
-well enough to ask better questions, contuts is doing useful work.
+well enough to ask better questions, contuts is doing useful work. No promise
+is made that the current prototype has solved this; the next step is to steer
+the interface through real use and let the useful model emerge.
 
 The older project notes are preserved in [`oldREADME.md`](oldREADME.md),
 [`oldDIRECTION.md`](oldDIRECTION.md), and

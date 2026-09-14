@@ -14,8 +14,16 @@ export function ApplyEditSubtree(arg1) {
   return window['go']['main']['App']['ApplyEditSubtree'](arg1);
 }
 
+export function ApplyEditView(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ApplyEditView'](arg1, arg2, arg3);
+}
+
 export function ApplyEditWithOptions(arg1, arg2) {
   return window['go']['main']['App']['ApplyEditWithOptions'](arg1, arg2);
+}
+
+export function ExplorePreviousCommitEdits(arg1) {
+  return window['go']['main']['App']['ExplorePreviousCommitEdits'](arg1);
 }
 
 export function GetReconciliationCandidates(arg1) {
@@ -26,8 +34,32 @@ export function Greet(arg1) {
   return window['go']['main']['App']['Greet'](arg1);
 }
 
+export function OpenDeclaration(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['OpenDeclaration'](arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
+export function OpenFile(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['OpenFile'](arg1, arg2, arg3, arg4);
+}
+
+export function OpenImportedDeclaration(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['OpenImportedDeclaration'](arg1, arg2, arg3, arg4);
+}
+
+export function OpenImportedFile(arg1, arg2, arg3) {
+  return window['go']['main']['App']['OpenImportedFile'](arg1, arg2, arg3);
+}
+
+export function OpenPackage(arg1, arg2, arg3) {
+  return window['go']['main']['App']['OpenPackage'](arg1, arg2, arg3);
+}
+
 export function OpenProgram(arg1) {
   return window['go']['main']['App']['OpenProgram'](arg1);
+}
+
+export function ProjectEdits(arg1) {
+  return window['go']['main']['App']['ProjectEdits'](arg1);
 }
 
 export function Reconcile(arg1) {
@@ -52,4 +84,8 @@ export function RemoveEditSiblings(arg1) {
 
 export function RemoveEditSubtree(arg1) {
   return window['go']['main']['App']['RemoveEditSubtree'](arg1);
+}
+
+export function RemoveEditView(arg1, arg2) {
+  return window['go']['main']['App']['RemoveEditView'](arg1, arg2);
 }

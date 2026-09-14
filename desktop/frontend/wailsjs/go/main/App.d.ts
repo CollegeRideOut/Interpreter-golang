@@ -9,13 +9,29 @@ export function ApplyEditSiblings(arg1:number):Promise<main.ProgramSnapshot>;
 
 export function ApplyEditSubtree(arg1:number):Promise<main.ProgramSnapshot>;
 
+export function ApplyEditView(arg1:number,arg2:boolean,arg3:Array<string>):Promise<main.ProgramSnapshot>;
+
 export function ApplyEditWithOptions(arg1:number,arg2:boolean):Promise<main.ProgramSnapshot>;
+
+export function ExplorePreviousCommitEdits(arg1:string):Promise<main.ProgramSnapshot>;
 
 export function GetReconciliationCandidates(arg1:string):Promise<Array<engine.ReconciliationCandidate>>;
 
 export function Greet(arg1:string):Promise<string>;
 
+export function OpenDeclaration(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:number):Promise<main.ProgramSnapshot>;
+
+export function OpenFile(arg1:string,arg2:string,arg3:string,arg4:string):Promise<main.ProgramSnapshot>;
+
+export function OpenImportedDeclaration(arg1:string,arg2:string,arg3:string,arg4:number):Promise<main.ProgramSnapshot>;
+
+export function OpenImportedFile(arg1:string,arg2:string,arg3:string):Promise<main.ProgramSnapshot>;
+
+export function OpenPackage(arg1:string,arg2:string,arg3:string):Promise<main.ProgramSnapshot>;
+
 export function OpenProgram(arg1:string):Promise<main.ProgramSnapshot>;
+
+export function ProjectEdits(arg1:Array<string>):Promise<Array<engine.EditView>>;
 
 export function Reconcile(arg1:engine.ReconciliationCandidate):Promise<main.ProgramSnapshot>;
 
@@ -28,3 +44,5 @@ export function RemoveEdit(arg1:number):Promise<main.ProgramSnapshot>;
 export function RemoveEditSiblings(arg1:number):Promise<main.ProgramSnapshot>;
 
 export function RemoveEditSubtree(arg1:number):Promise<main.ProgramSnapshot>;
+
+export function RemoveEditView(arg1:number,arg2:Array<string>):Promise<main.ProgramSnapshot>;

@@ -25,14 +25,17 @@
         {{ loading() ? 'Opening...' : 'Open program' }}
         <span aria-hidden="true">↗</span>
       </button>
-      <p class="hint">The directory must contain <code>main.go</code> and a previous Git version.</p>
-      <label class="reconcile-toggle">
+      <button class="quiet-button" (click)="explorePreviousCommitEdits()" [disabled]="loading()">Explore previous commit edits</button>
+      <p class="hint">Open program reads the current Go source. The edit explorer requires a previous Git version.</p>
+       @if (snapshot() && !snapshot()?.exploration) {
+       <label class="reconcile-toggle">
         <input type="checkbox" [checked]="autoReconcile()" (change)="autoReconcile.set($any($event.target).checked)" />
         <span>
           <strong>Auto-reconcile</strong>
           <small>{{ autoReconcile() ? 'Move nodes into parents automatically' : 'Leave orphan nodes for review' }}</small>
         </span>
-      </label>
+       </label>
+       }
 
       @if (snapshot(); as current) {
         <div class="program-card">
@@ -40,14 +43,26 @@
           <div>
             <strong>{{ current.path }}</strong>
             <small>Working tree active</small>
-          </div>
+              </div>
         </div>
-        <div class="metric-row">
+        @if (current.exploration && (current.localImports?.length ?? 0) > 0) {
+         <div class="local-imports">
+           <div class="section-label">LOCAL IMPORTS</div>
+           @for (imported of current.localImports ?? []; track imported) {
+             <div class="local-import">{{ imported }}</div>
+           }
+              </div>
+          }
+         @if (!current.exploration) {
+         <div class="metric-row">
           <span>Edits</span><strong>{{ current.edits.length }}</strong>
-        </div>
-        <div class="metric-row">
-          <span>Validity</span><strong [class.bad]="!current.valid">{{ current.valid ? 'Valid' : 'Needs review' }}</strong>
-        </div>
+         </div>
+         }
+         @if (!current.exploration) {
+         <div class="metric-row">
+           <span>Validity</span><strong [class.bad]="!current.valid">{{ current.valid ? 'Valid' : 'Needs review' }}</strong>
+         </div>
+         }
       }
     </aside>
 
@@ -57,6 +72,166 @@
       }
 
       @if (snapshot(); as current) {
+        @if (current.exploration) {
+          @if (!current.packageName) {
+          <div class="content-heading">
+            <div>
+              <div class="section-label">PROGRAM EXPLORER</div>
+              <h2>Packages</h2>
+            </div>
+            <span class="count-badge">{{ current.packages?.length ?? 0 }} packages</span>
+          </div>
+          <div class="package-list">
+            @for (pkg of current.packages ?? []; track pkg.directory + pkg.name) {
+              <article class="package-card" [class.main-package]="pkg.name === 'main'" [class.explorer-selected]="$index === explorerSelection()" (click)="explorerSelection.set($index); openPackage(pkg)">
+                <div class="program-icon">{{ pkg.name === 'main' ? 'MAIN' : 'PKG' }}</div>
+                <div>
+                  <strong>package {{ pkg.name }}</strong>
+                  <small>{{ pkg.directory || 'root package' }} · {{ pkg.fileCount }} source file{{ pkg.fileCount === 1 ? '' : 's' }}</small>
+                </div>
+                <button class="package-expand" (click)="togglePackage(pkg, $event)" [attr.aria-label]="expandedPackages()[packageKey(pkg)] ? 'Collapse package files' : 'Expand package files'">
+                  {{ expandedPackages()[packageKey(pkg)] ? '−' : '+' }}
+                </button>
+                @if (expandedPackages()[packageKey(pkg)]) {
+                  <div class="package-files" (click)="$event.stopPropagation()">
+                    @for (file of pkg.files ?? []; track file.path) {
+                      <div class="package-file" (click)="$event.stopPropagation(); openPackageFile(pkg, file)"><span>GO</span><strong>{{ file.name }}</strong></div>
+                    }
+                  </div>
+                }
+              </article>
+            } @empty {
+              <div class="empty-card"><h3>No Go packages found</h3><p>Choose a directory containing Go source files.</p></div>
+            }
+          </div>
+          <div class="keyboard-hint"><kbd>j</kbd><kbd>k</kbd> move <kbd>Enter</kbd>/<kbd>l</kbd> enter <kbd>Space</kbd> expand</div>
+          } @else if (!current.fileName) {
+            <div class="content-heading">
+              <div>
+                <div class="section-label">PACKAGE FILES</div>
+                <h2>{{ current.packageName }}</h2>
+              </div>
+              <button class="quiet-button" (click)="backToPackages()" [disabled]="loading()">Back to packages</button>
+              <span class="count-badge">{{ current.files?.length ?? 0 }} files</span>
+            </div>
+            <div class="visibility-filter" role="group" aria-label="Package view">
+              <span>View</span>
+              <button class="quiet-button" [class.active-view]="packageLens() === 'files'" (click)="packageLens.set('files'); explorerSelection.set(0)">Files</button>
+              <button class="quiet-button" [class.active-view]="packageLens() === 'api'" (click)="packageLens.set('api'); explorerSelection.set(0)">Exported API</button>
+            </div>
+            @if (packageLens() === 'api') {
+              <div class="api-explorer-grid">
+                <div class="package-list api-list">
+                  @for (row of exportedApiRows(current.files); track row.file.path + row.declaration.kind + row.declaration.name + row.declaration.line) {
+                    <article class="package-card declaration-card api-row" [class.child-declaration-card]="row.child" [class.explorer-selected]="$index === explorerSelection()" (click)="explorerSelection.set($index); openApiRow(row)">
+                      <div class="program-icon">GO</div>
+                      <div><span class="declaration-kind">{{ row.declaration.kind }}</span><strong>{{ row.declaration.name }}</strong><small>{{ row.file.name }} · line {{ row.declaration.line }}</small></div>
+                    </article>
+                  }
+                </div>
+                @if (apiSource(); as source) {
+                  <div class="source-panel file-source api-source"><div class="section-label">{{ source.fileName }}</div><pre>@for (line of sourceLines(); track $index) { @if (sourceLineVisible($index + 1)) { <span class="source-line" [id]="'source-line-' + ($index + 1)" [class.source-selected]="sourceLineSelected($index + 1)">{{ ($index + 1).toString().padStart(3, ' ') }}  {{ line }}</span> } }</pre></div>
+                }
+              </div>
+            } @else {
+            <div class="package-list">
+              @for (file of current.files ?? []; track file.path) {
+                <article class="package-card file-card" [class.explorer-selected]="$index === explorerSelection()" (click)="explorerSelection.set($index); openFile(file)">
+                  <div class="program-icon">GO</div>
+                  <div>
+                    <strong>{{ file.name }}</strong>
+                    <small>{{ file.path || file.name }}</small>
+                  </div>
+                  <button class="package-expand" (click)="toggleFile(file, $event)" [attr.aria-label]="expandedFiles()[file.path] ? 'Collapse file declarations' : 'Expand file declarations'">
+                    {{ expandedFiles()[file.path] ? '−' : '+' }}
+                  </button>
+                  @if (expandedFiles()[file.path]) {
+                    <div class="file-declarations" (click)="$event.stopPropagation()">
+                      @for (declaration of file.declarations ?? []; track declaration.kind + declaration.name + declaration.line) {
+                        @if (showDeclaration(declaration)) {
+                          <div class="file-declaration"><span>{{ declaration.kind }}</span><strong>{{ declaration.name }}</strong><small>line {{ declaration.line }}</small></div>
+                          @for (child of visibleChildren(declaration); track child.kind + child.name + child.line) {
+                            <div class="file-declaration nested-declaration"><span class="tree-marker">-</span><span>{{ child.kind }}</span><strong>{{ child.name }}</strong><small>line {{ child.line }}</small></div>
+                          }
+                        }
+                      }
+                    </div>
+                  }
+                </article>
+              } @empty {
+                <div class="empty-card"><h3>No Go files found</h3><p>This package has no source files.</p></div>
+              }
+            </div>
+            }
+            <div class="keyboard-hint"><kbd>j</kbd><kbd>k</kbd> move <kbd>Enter</kbd>/<kbd>l</kbd> enter <kbd>Space</kbd> expand <kbd>h</kbd>/<kbd>Esc</kbd> back</div>
+          } @else {
+            <div class="content-heading">
+              <div>
+                <div class="section-label">FILE DECLARATIONS</div>
+                <h2>{{ current.fileName }}</h2>
+              </div>
+              <button class="quiet-button" (click)="backToFiles()" [disabled]="loading()">Back to files</button>
+              <span class="count-badge">{{ current.declarations?.length ?? 0 }} declarations</span>
+            </div>
+            <div class="visibility-filter" role="group" aria-label="Declaration visibility">
+              <span>Show</span>
+              <button class="quiet-button" [class.active-view]="declarationVisibility() === 'all'" (click)="declarationVisibility.set('all')">All</button>
+              <button class="quiet-button" [class.active-view]="declarationVisibility() === 'exported'" (click)="declarationVisibility.set('exported')">Exported</button>
+              <button class="quiet-button" [class.active-view]="declarationVisibility() === 'unexported'" (click)="declarationVisibility.set('unexported')">Unexported</button>
+            </div>
+            <div class="keyboard-hint"><kbd>j</kbd><kbd>k</kbd> move <kbd>Enter</kbd>/<kbd>l</kbd> enter <kbd>Space</kbd> expand <kbd>h</kbd>/<kbd>Esc</kbd> back</div>
+            <div class="explorer-panes">
+            <div class="explorer-tile">
+            <div class="file-explorer-grid">
+              <div class="package-list declaration-list">
+                @if ((current.imports?.length ?? 0) > 0) { <div class="section-label import-label">IMPORTS</div> }
+                 @for (imported of current.imports ?? []; track imported.path) {
+                  <article class="package-card import-card" [class.import-selected]="importedPackage()?.path === imported.path" (click)="openImportedPackage(imported)">
+                    <div class="program-icon">IMP</div>
+                    <div><strong>{{ imported.name }}</strong><small>{{ imported.path }}</small></div>
+                    <button class="package-expand" (click)="toggleImportedPackage(imported, $event)">{{ expandedImports()[imported.path] ? '−' : '+' }}</button>
+                    @if (expandedImports()[imported.path]) {
+                      <div class="package-files" (click)="$event.stopPropagation()">
+                        @for (file of imported.files; track file.path) { <div class="package-file" [class.imported-file-selected]="importedFilePath() === file.path" (click)="$event.stopPropagation(); openImportedFile(imported, file)"><span>GO</span><strong>{{ file.name }}</strong></div> }
+                      </div>
+                    }
+                  </article>
+                }
+                @for (row of declarationRows(); track row.declaration.kind + row.declaration.name + row.declaration.line) {
+                    <article class="package-card declaration-card" [class.child-declaration-card]="row.child" [class.explorer-selected]="selectedDeclarationLine() === row.declaration.line" (click)="selectDeclaration(row.declaration)">
+                      <div class="program-icon">GO</div>
+                        <div><span class="tree-marker" [class.hidden-marker]="!row.child">-</span><span class="declaration-kind">{{ row.declaration.kind }}</span><strong>{{ row.declaration.name }}</strong><small>{{ declarationSignature(row.declaration) }} · line {{ row.declaration.line }}</small>@for (reference of row.declaration.typeReferences ?? []; track reference.filePath + reference.declaration) { <button class="type-link" (click)="$event.stopPropagation(); openRelatedReference(reference)">open type {{ reference.name }}</button> }</div>
+                    </article>
+                } @empty {
+                  <div class="empty-card"><h3>No top-level declarations</h3><p>This file contains no functions, types, constants, or variables.</p></div>
+                }
+              </div>
+              <div class="source-stack"><div class="source-panel file-source"><div class="section-label">{{ current.fileName }}</div><pre>@for (line of sourceLines(); track $index) { @if (sourceLineVisible($index + 1)) { <span class="source-line" [id]="'source-line-' + ($index + 1)" [class.source-selected]="sourceLineSelected($index + 1)" [class.source-reference]="sourceLineReferenced($index + 1)">{{ ($index + 1).toString().padStart(3, ' ') }}  {{ line }}</span> } }</pre></div></div>
+             </div>
+             </div>
+            <div class="explorer-tile secondary-explorer-tile">
+                 @if (importedSource(); as imported) {
+                   <div class="content-heading secondary-heading"><div><div class="section-label">FILE DECLARATIONS</div><h2>{{ imported.fileName || imported.importedFileName }}</h2></div><span class="count-badge">{{ imported.declarations?.length ?? 0 }} declarations</span></div>
+                   <div class="file-explorer-grid secondary-file-grid"><div class="package-list declaration-list">@if (importedPackage(); as package) { @for (file of package.files; track file.path) { @if (importedFilePath() === file.path) { <article class="package-card file-card imported-right-file explorer-selected"><div class="program-icon">GO</div><div><strong>{{ file.name }}</strong><small>{{ file.path }}</small></div></article> } } } @for (row of declarationRowsFor(imported); track row.declaration.kind + row.declaration.name + row.declaration.line) { <article class="package-card declaration-card" [class.child-declaration-card]="row.child" [class.explorer-selected]="importedDeclarationLine() === row.declaration.line"><div class="program-icon">GO</div><div><span class="tree-marker" [class.hidden-marker]="!row.child">-</span><span class="declaration-kind">{{ row.declaration.kind }}</span><strong>{{ row.declaration.name }}</strong><small>line {{ row.declaration.line }}</small></div></article> }</div><div class="source-panel file-source secondary-source"><div class="section-label">SOURCE</div><pre>@for (line of importedSourceLines(); track $index) { <span class="source-line">{{ ($index + 1).toString().padStart(3, ' ') }}  {{ line }}</span> }</pre></div></div>
+                 }
+                 @if ((currentFileReferences()?.length ?? 0) > 0) {
+                   <div class="section-label import-label">SAME-PACKAGE REFERENCES</div>
+                   @for (reference of currentFileReferences() ?? []; track reference.filePath + reference.declaration) {
+                     <button class="package-card related-card" (click)="openRelatedReference(reference)"><div class="program-icon">REF</div><div><strong>{{ reference.name }}</strong><small>{{ reference.filePath }} · {{ reference.kind }} · line {{ reference.line }}</small></div></button>
+                   }
+                 }
+                @else if (importedPackage(); as imported) {
+                    <div class="section-label">PACKAGE {{ imported.name }}</div>
+                    <div class="visibility-filter"><span>View</span><button class="quiet-button" [class.active-view]="importedPackageLens() === 'files'" (click)="importedPackageLens.set('files')">Files</button><button class="quiet-button" [class.active-view]="importedPackageLens() === 'api'" (click)="importedPackageLens.set('api')">Exported API</button></div>
+                    @if (importedPackageLens() === 'files') {
+                       <div class="secondary-files">@for (file of imported.files; track file.path) { <button class="package-card file-card secondary-file-card" [class.explorer-selected]="importedFilePath() === file.path" (click)="openImportedFile(imported, file)"><span class="program-icon">GO</span><span><strong>{{ file.name }}</strong><small>{{ file.path }}</small></span></button> }</div>
+                    } @else {
+                       <div class="secondary-files">@for (declaration of imported.declarations; track declaration.kind + declaration.name + declaration.line) { @if (declaration.exported || hasExportedChild(declaration)) { <button class="package-card declaration-card secondary-api-card" [class.explorer-selected]="importedDeclarationLine() === declaration.line" (click)="selectImportedDeclaration(imported, declaration)"><span class="program-icon">GO</span><span><strong>{{ declaration.kind }} {{ declaration.name }}</strong><small>{{ imported.name }} · line {{ declaration.line }}</small></span></button> @for (child of declaration.children ?? []; track child.kind + child.name + child.line) { @if (child.exported) { <button class="package-card declaration-card secondary-api-card child-declaration-card" [class.explorer-selected]="importedDeclarationLine() === child.line" (click)="selectImportedDeclaration(imported, child)"><span class="program-icon">GO</span><span><strong>- method {{ child.name }}</strong><small>{{ imported.name }} · line {{ child.line }}</small></span></button> } } } }</div> }
+                 } @else { <div class="empty-card secondary-empty"><h3>Select an import</h3><p>Choose a local package from the left to open it here.</p></div> }
+            </div>
+            </div>
+         }
+        } @else {
         <div class="content-heading">
           <div>
             <div class="section-label">EDIT SCRIPT</div>
@@ -64,8 +239,8 @@
           </div>
           <div class="heading-actions">
             <div class="view-toggle" role="group" aria-label="Edit detail level">
-              <button class="quiet-button" [class.active-view]="editView() === 'lifted'" (click)="editView.set('lifted')">Lifted AST</button>
-              <button class="quiet-button" [class.active-view]="editView() === 'ast'" (click)="editView.set('ast')">AST</button>
+               <button class="quiet-button" [class.active-view]="editView() === 'lifted'" (click)="setEditView('lifted')">Lifted AST</button>
+               <button class="quiet-button" [class.active-view]="editView() === 'ast'" (click)="setEditView('ast')">AST</button>
             </div>
             <button class="quiet-button" (click)="expandAll()">Expand all</button>
             <button class="quiet-button" (click)="collapseAll()">Collapse all</button>
@@ -85,16 +260,15 @@
         <div class="review-grid">
           <div class="edit-list">
             @for (edit of visibleEditRows(); track edit.index) {
-              @if (!(editView() === 'lifted' && (edit.nodeKind === '*ast.BlockStmt'))) {
-              <article class="edit-card" [class.applied]="current.status[edit.index] === 'applied' || current.status[edit.index] === 'prepared'" [class.child-edit]="edit.depth > 0" [class.structural-warning]="issuesForEdit(edit.index).length > 0" [class.selected-edit]="isSelectedEdit(edit.index)" [attr.data-edit-index]="edit.index" (click)="selectEdit(edit.index)">
+               <article class="edit-card" [class.applied]="current.status[edit.index] === 'applied' || current.status[edit.index] === 'prepared'" [class.child-edit]="edit.depth > 0" [class.structural-warning]="issuesForEdit(edit.index).length > 0" [class.selected-edit]="isSelectedEdit(edit.index)" [attr.data-edit-index]="edit.index" (click)="selectEdit(edit.index)">
                 <div class="edit-index">
                   @if (edit.hasChildren) {
                     <button class="expand-button" (click)="toggleExpandedEdit(edit.index)">{{ expandedEdits()[edit.index] === true ? '−' : '+' }}</button>
                   } @else {
                     <span class="tree-branch">└</span>
-                  }
-                  {{ (edit.index + 1).toString().padStart(2, '0') }}
-                </div>
+                   {{ (edit.index + 1).toString().padStart(2, '0') }}
+                   }
+                 </div>
                 <div class="edit-details">
                   <div class="edit-title">
                     <span class="edit-kind">{{ edit.kind }}</span>
@@ -126,8 +300,7 @@
                       <button class="quiet-button" (click)="removeEdit(edit.index)">Remove</button>
                       @if (edit.hasChildren) {
                         <button class="quiet-button subtree-remove" (click)="removeEditSubtree(edit.index)">Remove line + kids</button>
-                      }
-                    } @else {
+         }
                     <button class="quiet-button apply" (click)="applyEdit(edit.index)">Apply</button>
                     @if (edit.hasChildren) {
                       <button class="quiet-button subtree" (click)="applyEditSubtree(edit.index)">Apply line + kids</button>
@@ -135,10 +308,9 @@
                    }
                    <button class="quiet-button sibling-action" (click)="toggleEditSiblings(edit.index)">{{ siblingsApplied(edit.index) ? 'Remove siblings + kids' : 'Apply siblings + kids' }}</button>
                    <span class="edit-status">{{ current.status[edit.index] }}</span>
-                </div>
-              </article>
-              }
-            } @empty {
+               </div>
+               </article>
+             } @empty {
               <div class="empty-card">
                 <span class="empty-symbol">∅</span>
                 <h3>No structural edits</h3>
@@ -184,6 +356,7 @@
           </section>
 
         </div>
+        }
       } @else {
         <div class="empty-state">
           <div class="orb">{{ '{' }} {{ '}' }}</div>

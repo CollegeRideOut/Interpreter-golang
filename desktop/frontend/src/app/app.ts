@@ -1,6 +1,6 @@
 import { Component, HostListener, signal } from '@angular/core';
 
-import { ApplyEditSiblings, ApplyEditSubtree, ApplyEditWithOptions, OpenProgram, Reconcile, ReconcileGroup, ReconcileSelected, RemoveEdit, RemoveEditSiblings, RemoveEditSubtree } from '../../wailsjs/go/main/App';
+import { ApplyEditSiblings, ApplyEditSubtree, ApplyEditView, ApplyEditWithOptions, ExplorePreviousCommitEdits, OpenDeclaration, OpenFile, OpenImportedDeclaration, OpenImportedFile, OpenPackage, OpenProgram, ProjectEdits, Reconcile, ReconcileGroup, ReconcileSelected, RemoveEdit, RemoveEditSiblings, RemoveEditSubtree, RemoveEditView } from '../../wailsjs/go/main/App';
 
 interface EditRow {
   nodeId: string;
@@ -22,6 +22,13 @@ interface EditView extends EditRow {
   descendantCount: number;
 }
 
+interface ProjectedEdit {
+  editIndex: number;
+  depth: number;
+  hasChildren: boolean;
+  descendantCount: number;
+}
+
 interface ProgramSnapshot {
   path: string;
   source: string;
@@ -34,6 +41,91 @@ interface ProgramSnapshot {
   valid: boolean;
   diagnostics?: string[];
   candidates?: ProgramCandidate[];
+  editViews?: ProjectedEdit[];
+  exploration?: boolean;
+  packages?: PackageSummary[];
+  packageName?: string;
+  files?: FileSummary[];
+  packageDirectory?: string;
+  fileName?: string;
+  filePath?: string;
+  declarations?: DeclarationSummary[];
+  localImports?: string[];
+  imports?: ImportSummary[];
+  importedFileName?: string;
+  importedSource?: string;
+  importedName?: string;
+  fileSource?: string;
+  declarationName?: string;
+  declarationSource?: string;
+}
+
+interface PackageSummary {
+  name: string;
+  directory: string;
+  fileCount: number;
+  files?: FileSummary[];
+}
+
+interface FileSummary {
+  name: string;
+  path: string;
+  declarations?: DeclarationSummary[];
+  samePackageReferences?: ReferenceSummary[];
+}
+
+interface ReferenceSummary {
+  name: string;
+  kind: string;
+  packagePath: string;
+  filePath: string;
+  declaration: string;
+  line: number;
+}
+
+interface DeclarationSummary {
+  kind: string;
+  name: string;
+  receiver?: string;
+  line: number;
+  endLine: number;
+  exported: boolean;
+  parameters?: ParameterSummary[];
+  results?: ParameterSummary[];
+  type?: string;
+  typeReferences?: ReferenceSummary[];
+  children?: DeclarationSummary[];
+}
+
+interface ParameterSummary {
+  name?: string;
+  type: string;
+}
+
+interface ImportSummary {
+  path: string;
+  name: string;
+  directory: string;
+  files: FileSummary[];
+  declarations: DeclarationSummary[];
+}
+
+interface DeclarationRow {
+  declaration: DeclarationSummary;
+  child: boolean;
+}
+
+interface PackageApiRow {
+  file: FileSummary;
+  declaration: DeclarationSummary;
+  child: boolean;
+}
+
+function showDeclarationFor(declaration: DeclarationSummary, visibility: 'all' | 'exported' | 'unexported'): boolean {
+  if (declaration.kind === 'struct' || declaration.kind === 'type') {
+    return visibility === 'all' || (declaration.children ?? []).some((child) => visibility === 'exported' ? child.exported : !child.exported);
+  }
+  return visibility === 'all' || (visibility === 'exported' ? declaration.exported : !declaration.exported);
 }
 
 interface ProgramCandidate {
@@ -109,6 +201,20 @@ export class App {
   protected readonly error = signal('');
   protected readonly loading = signal(false);
   protected readonly expandedEdits = signal<Record<number, boolean>>({});
+  protected readonly expandedPackages = signal<Record<string, boolean>>({});
+  protected readonly expandedFiles = signal<Record<string, boolean>>({});
+  protected readonly declarationVisibility = signal<'all' | 'exported' | 'unexported'>('all');
+  protected readonly packageLens = signal<'files' | 'api'>('files');
+  protected readonly selectedDeclarationLine = signal<number | null>(null);
+  protected readonly apiSource = signal<ProgramSnapshot | null>(null);
+  protected readonly importedSource = signal<ProgramSnapshot | null>(null);
+  protected readonly importedPackage = signal<ImportSummary | null>(null);
+  protected readonly importedFilePath = signal<string | null>(null);
+  protected readonly importedDeclarationLine = signal<number | null>(null);
+  protected readonly importedPackageLens = signal<'files' | 'api'>('files');
+  protected readonly referencedUsageLines = signal<number[]>([]);
+  protected readonly expandedImports = signal<Record<string, boolean>>({});
+  protected readonly explorerSelection = signal(0);
   protected readonly editRows = signal<EditView[]>([]);
   protected readonly editView = signal<'ast' | 'lifted'>('lifted');
   protected readonly liftedShells = signal<Record<string, boolean>>({
@@ -141,7 +247,11 @@ export class App {
     OpenProgram(this.programPath()).then((snapshot) => {
       const current = snapshot as ProgramSnapshot;
       this.snapshot.set(current);
+      this.apiSource.set(null);
       this.expandedEdits.set({});
+      this.expandedPackages.set({});
+      this.expandedFiles.set({});
+      this.explorerSelection.set(0);
       this.lastOperation.set(null);
       this.rebuildViews(current);
       this.loading.set(false);
@@ -151,25 +261,370 @@ export class App {
     });
   }
 
+  protected explorePreviousCommitEdits(): void {
+    this.loading.set(true);
+    this.error.set('');
+    ExplorePreviousCommitEdits(this.programPath()).then((snapshot) => {
+      const current = snapshot as ProgramSnapshot;
+      this.snapshot.set(current);
+      this.apiSource.set(null);
+      this.expandedEdits.set({});
+      this.expandedPackages.set({});
+      this.expandedFiles.set({});
+      this.explorerSelection.set(0);
+      this.lastOperation.set(null);
+      this.rebuildViews(current);
+      this.loading.set(false);
+    }).catch((error: Error) => {
+      this.error.set(error.message);
+      this.loading.set(false);
+    });
+  }
+
+  protected openPackage(pkg: PackageSummary): void {
+    this.loading.set(true);
+    this.error.set('');
+    OpenPackage(this.programPath(), pkg.directory, pkg.name).then((snapshot) => {
+      const current = snapshot as ProgramSnapshot;
+      this.snapshot.set(current);
+      this.apiSource.set(null);
+      this.packageLens.set('files');
+      this.explorerSelection.set(0);
+      this.loading.set(false);
+    }).catch((error: Error) => {
+      this.error.set(error.message);
+      this.loading.set(false);
+    });
+  }
+
+  protected backToPackages(): void {
+    this.loading.set(true);
+    this.error.set('');
+    OpenProgram(this.programPath()).then((snapshot) => {
+      const current = snapshot as ProgramSnapshot;
+      this.snapshot.set(current);
+      this.apiSource.set(null);
+      this.packageLens.set('files');
+      this.expandedPackages.set({});
+      this.loading.set(false);
+    }).catch((error: Error) => {
+      this.error.set(error.message);
+      this.loading.set(false);
+    });
+  }
+
+  protected togglePackage(pkg: PackageSummary, event: Event): void {
+    event.stopPropagation();
+    const key = this.packageKey(pkg);
+    this.expandedPackages.update((expanded) => ({ ...expanded, [key]: !expanded[key] }));
+  }
+
+  protected packageKey(pkg: PackageSummary): string {
+    return `${pkg.directory}:${pkg.name}`;
+  }
+
+  protected openFile(file: FileSummary): void {
+    const current = this.snapshot();
+    if (!current?.packageName || current.packageDirectory === undefined) {
+      return;
+    }
+    this.loading.set(true);
+    this.error.set('');
+    OpenFile(this.programPath(), current.packageDirectory, current.packageName, file.path).then((snapshot) => {
+      this.snapshot.set(snapshot as ProgramSnapshot);
+      this.importedSource.set(null);
+      this.importedFilePath.set(null);
+      this.importedDeclarationLine.set(null);
+      this.referencedUsageLines.set([]);
+      this.importedPackage.set(null);
+      this.declarationVisibility.set('all');
+      this.explorerSelection.set(0);
+      this.loading.set(false);
+    }).catch((error: Error) => {
+      this.error.set(error.message);
+      this.loading.set(false);
+    });
+  }
+
+  protected openApiRow(row: PackageApiRow): void {
+    this.loading.set(true);
+    this.error.set('');
+    OpenFile(this.programPath(), this.snapshot()?.packageDirectory ?? '', this.snapshot()?.packageName ?? '', row.file.path).then((snapshot) => {
+      this.apiSource.set(snapshot as ProgramSnapshot);
+      this.declarationVisibility.set('all');
+      this.loading.set(false);
+      this.selectDeclaration(row.declaration);
+    }).catch((error: Error) => {
+      this.error.set(error.message);
+      this.loading.set(false);
+    });
+  }
+
+  protected openPackageFile(pkg: PackageSummary, file: FileSummary): void {
+    this.loading.set(true);
+    this.error.set('');
+    OpenFile(this.programPath(), pkg.directory, pkg.name, file.path).then((snapshot) => {
+      this.snapshot.set(snapshot as ProgramSnapshot);
+      this.importedSource.set(null);
+      this.importedFilePath.set(null);
+      this.importedDeclarationLine.set(null);
+      this.referencedUsageLines.set([]);
+      this.importedPackage.set(null);
+      this.declarationVisibility.set('all');
+      this.explorerSelection.set(0);
+      this.loading.set(false);
+    }).catch((error: Error) => {
+      this.error.set(error.message);
+      this.loading.set(false);
+    });
+  }
+
+  protected openImportedDeclaration(imported: ImportSummary, declaration: DeclarationSummary): void {
+    this.importedPackage.set(imported);
+    this.importedFilePath.set(null);
+    this.importedDeclarationLine.set(declaration.line);
+    this.loading.set(true);
+    this.error.set('');
+    OpenImportedDeclaration(this.programPath(), imported.path, declaration.name, declaration.line).then((snapshot) => {
+      this.importedSource.set(snapshot as ProgramSnapshot);
+      this.loading.set(false);
+    }).catch((error: Error) => {
+      this.error.set(error.message);
+      this.loading.set(false);
+    });
+  }
+
+  protected openImportedPackage(imported: ImportSummary): void {
+    this.importedPackage.set(imported);
+    this.importedSource.set(null);
+    this.importedFilePath.set(null);
+    this.importedDeclarationLine.set(null);
+    this.importedPackageLens.set('files');
+    this.referencedUsageLines.set([]);
+  }
+
+  protected openRelatedReference(reference: ReferenceSummary): void {
+    const imported: ImportSummary = { path: reference.packagePath, name: reference.packagePath.split('/').pop() ?? reference.packagePath, directory: '', files: [], declarations: [] };
+    this.importedPackage.set(imported);
+    this.importedFilePath.set(reference.filePath);
+    this.importedDeclarationLine.set(reference.line);
+    this.openImportedFile(imported, { name: reference.filePath.split('/').pop() ?? reference.filePath, path: reference.filePath });
+  }
+
+  protected toggleImportedPackage(imported: ImportSummary, event: Event): void {
+    event.stopPropagation();
+    this.expandedImports.update((expanded) => ({ ...expanded, [imported.path]: !expanded[imported.path] }));
+  }
+
+  protected openImportedFile(imported: ImportSummary, file: FileSummary): void {
+    this.importedPackage.set(imported);
+    this.importedFilePath.set(file.path);
+    this.importedDeclarationLine.set(null);
+    this.loading.set(true);
+    this.error.set('');
+    OpenImportedFile(this.programPath(), imported.path, file.path).then((snapshot) => {
+      this.importedPackage.set(imported);
+      this.importedSource.set(snapshot as ProgramSnapshot);
+      this.importedPackageLens.set('files');
+      this.loading.set(false);
+    }).catch((error: Error) => {
+      this.error.set(error.message);
+      this.loading.set(false);
+    });
+  }
+
+  protected selectImportedDeclaration(imported: ImportSummary, declaration: DeclarationSummary): void {
+    this.importedPackage.set(imported);
+    this.importedDeclarationLine.set(declaration.line);
+    this.loading.set(true);
+    this.error.set('');
+    OpenImportedDeclaration(this.programPath(), imported.path, declaration.name, declaration.line).then((snapshot) => {
+      this.importedPackage.set(imported);
+      this.importedSource.set(snapshot as ProgramSnapshot);
+      this.importedPackageLens.set('api');
+      const alias = imported.path.split('/').pop() ?? imported.name;
+      const pattern = new RegExp(`\\b${alias}\\.${declaration.name}\\b`);
+      this.referencedUsageLines.set(this.sourceLines().flatMap((line, index) => pattern.test(line) ? [index + 1] : []));
+      this.loading.set(false);
+    }).catch((error: Error) => {
+      this.error.set(error.message);
+      this.loading.set(false);
+    });
+  }
+
+  protected importedApiRows(imported: ImportSummary): Array<{ declaration: DeclarationSummary; child: boolean }> {
+    return imported.declarations.flatMap((declaration) => [
+      { declaration, child: false },
+      ...(declaration.children ?? []).filter((child) => child.exported).map((child) => ({ declaration: child, child: true })),
+    ]);
+  }
+
+  protected sourceLineReferenced(line: number): boolean {
+    return this.referencedUsageLines().includes(line);
+  }
+
+  protected hasExportedChild(declaration: DeclarationSummary): boolean {
+    return (declaration.children ?? []).some((child) => child.exported);
+  }
+
+  protected backToFiles(): void {
+    const current = this.snapshot();
+    if (!current?.packageName || current.packageDirectory === undefined) {
+      return;
+    }
+    this.loading.set(true);
+    this.error.set('');
+    OpenPackage(this.programPath(), current.packageDirectory, current.packageName).then((snapshot) => {
+      this.snapshot.set(snapshot as ProgramSnapshot);
+      this.expandedFiles.set({});
+      this.explorerSelection.set(0);
+      this.loading.set(false);
+    }).catch((error: Error) => {
+      this.error.set(error.message);
+      this.loading.set(false);
+    });
+  }
+
+  protected openDeclaration(declaration: DeclarationSummary): void {
+    const current = this.snapshot();
+    if (!current?.packageName || current.packageDirectory === undefined || !current.filePath) {
+      return;
+    }
+    this.loading.set(true);
+    this.error.set('');
+    OpenDeclaration(this.programPath(), current.packageDirectory, current.packageName, current.filePath, declaration.name, declaration.line).then((snapshot) => {
+      this.snapshot.set(snapshot as ProgramSnapshot);
+      this.loading.set(false);
+    }).catch((error: Error) => {
+      this.error.set(error.message);
+      this.loading.set(false);
+    });
+  }
+
+  protected backToDeclarationList(): void {
+    const current = this.snapshot();
+    if (!current?.packageName || current.packageDirectory === undefined || !current.filePath) {
+      return;
+    }
+    this.openFile({ name: current.fileName ?? current.filePath, path: current.filePath });
+  }
+
+  protected toggleFile(file: FileSummary, event: Event): void {
+    event.stopPropagation();
+    this.expandedFiles.update((expanded) => ({ ...expanded, [file.path]: !expanded[file.path] }));
+  }
+
+  protected declarationVisible(declaration: DeclarationSummary): boolean {
+    const visibility = this.declarationVisibility();
+    return visibility === 'all' || (visibility === 'exported' ? declaration.exported : !declaration.exported);
+  }
+
+  protected visibleChildren(declaration: DeclarationSummary): DeclarationSummary[] {
+    return (declaration.children ?? []).filter((child) => this.declarationVisible(child));
+  }
+
+  protected showDeclaration(declaration: DeclarationSummary): boolean {
+    return showDeclarationFor(declaration, this.declarationVisibility());
+  }
+
+  protected declarationSignature(declaration: DeclarationSummary): string {
+    if (declaration.kind === 'function' || declaration.kind === 'method') {
+      const parameters = (declaration.parameters ?? []).map((parameter) => parameter.name ? `${parameter.name} ${parameter.type}` : parameter.type).join(', ');
+      const results = (declaration.results ?? []).map((result) => result.type).join(', ');
+      return `(${parameters})${results ? ` -> ${results}` : ''}`;
+    }
+    return declaration.type ?? '';
+  }
+
+  protected currentFileReferences(): ReferenceSummary[] {
+    const current = this.snapshot();
+    return current?.files?.find((file) => file.path === current.filePath)?.samePackageReferences ?? [];
+  }
+
+  protected exportedDeclarations(file: FileSummary): DeclarationSummary[] {
+    return (file.declarations ?? []).filter((declaration) => declaration.exported || declaration.children?.some((child) => child.exported));
+  }
+
+  protected exportedApiRows(files: FileSummary[] = this.snapshot()?.files ?? []): PackageApiRow[] {
+    return files.flatMap((file) => (file.declarations ?? []).flatMap((declaration) => {
+      if (!declaration.exported && !(declaration.children ?? []).some((child) => child.exported)) {
+        return [];
+      }
+      return [
+        { file, declaration, child: false },
+        ...(declaration.children ?? []).filter((child) => child.exported).map((child) => ({ file, declaration: child, child: true })),
+      ];
+    }));
+  }
+
+  protected visibleDeclarationItems(declarations: DeclarationSummary[] = this.snapshot()?.declarations ?? []): DeclarationSummary[] {
+    return declarations.flatMap((declaration) => showDeclarationFor(declaration, this.declarationVisibility()) ? [declaration, ...(declaration.children ?? []).filter((child) => this.declarationVisible(child))] : []);
+  }
+
+  protected declarationRows(): DeclarationRow[] {
+    return (this.snapshot()?.declarations ?? []).flatMap((declaration) => {
+      if (!this.showDeclaration(declaration)) {
+        return [];
+      }
+      return [
+        { declaration, child: false },
+        ...this.visibleChildren(declaration).map((child) => ({ declaration: child, child: true })),
+      ];
+    });
+  }
+
+  protected declarationRowsFor(snapshot: ProgramSnapshot): DeclarationRow[] {
+    return (snapshot.declarations ?? []).flatMap((declaration) => [
+      { declaration, child: false },
+      ...(declaration.children ?? []).map((child) => ({ declaration: child, child: true })),
+    ]);
+  }
+
+  protected importedSourceLines(): string[] {
+    const source = this.importedSource();
+    return (source?.fileSource ?? source?.importedSource ?? '').split('\n');
+  }
+
+  protected sourceLines(): string[] {
+    return (this.activeSource()?.fileSource ?? '').split('\n');
+  }
+
+  protected activeSource(): ProgramSnapshot | null {
+    return this.apiSource() ?? this.snapshot();
+  }
+
+  protected sourceLineVisible(line: number): boolean {
+    const declaration = (this.activeSource()?.declarations ?? []).flatMap((item) => [item, ...(item.children ?? [])]).find((item) => line >= item.line && line <= item.endLine);
+    return !declaration || this.showDeclaration(declaration);
+  }
+
+  protected sourceLineSelected(line: number): boolean {
+    const selected = this.selectedDeclarationLine();
+    const declaration = (this.activeSource()?.declarations ?? []).flatMap((item) => [item, ...(item.children ?? [])]).find((item) => item.line === selected);
+    return selected !== null && declaration !== undefined && line >= declaration.line && line <= declaration.endLine;
+  }
+
+  protected selectDeclaration(declaration: DeclarationSummary): void {
+    this.selectedDeclarationLine.set(declaration.line);
+    setTimeout(() => document.getElementById(`source-line-${declaration.line}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0);
+  }
+
   protected applyEdit(index: number): void {
-    this.applyWithLiftedParent(index, () => ApplyEditWithOptions(index, this.autoReconcile()), 'Apply edit');
+    const operation = this.editView() === 'lifted'
+      ? () => ApplyEditView(index, this.autoReconcile(), this.hiddenKinds())
+      : () => ApplyEditWithOptions(index, this.autoReconcile());
+    this.applyWithLiftedParent(index, operation, 'Apply edit');
   }
 
   protected applyEditSubtree(index: number): void {
-    this.applyWithLiftedParent(index, () => ApplyEditSubtree(index), 'Apply edit subtree');
+    const operation = this.editView() === 'lifted'
+      ? () => ApplyEditView(index, this.autoReconcile(), this.hiddenKinds()).then(() => ApplyEditSubtree(index))
+      : () => ApplyEditSubtree(index);
+    this.applyWithLiftedParent(index, operation, 'Apply edit subtree');
   }
 
   private applyWithLiftedParent(index: number, operation: () => Promise<unknown>, label: string): void {
-    const current = this.snapshot();
-    const edit = current?.edits[index];
-    const ancestors = edit && this.editView() === 'lifted' ? this.liftedAncestorIndexes(index) : [];
-    const prepareParents = ancestors.reduce((promise, parentIndex) => promise.then(() => {
-      if (current?.status[parentIndex] === 'applied') {
-        return;
-      }
-      return ApplyEditWithOptions(parentIndex, this.autoReconcile()).then(() => undefined);
-    }), Promise.resolve());
-    prepareParents.then(() => operation())
+    operation()
       .then((snapshot) => this.setSnapshot(snapshot as ProgramSnapshot, label, index))
       .catch((error: Error) => this.error.set(error.message));
   }
@@ -185,7 +640,10 @@ export class App {
       RemoveEditSiblings(index).then((snapshot) => this.setSnapshot(snapshot as ProgramSnapshot, 'Remove siblings', index))
         .catch((error: Error) => this.error.set(error.message));
     } else {
-      this.applyWithLiftedParent(index, () => ApplyEditSiblings(index), 'Apply siblings');
+      const operation = this.editView() === 'lifted'
+        ? () => ApplyEditView(index, this.autoReconcile(), this.hiddenKinds()).then(() => ApplyEditSiblings(index))
+        : () => ApplyEditSiblings(index);
+      this.applyWithLiftedParent(index, operation, 'Apply siblings');
     }
   }
 
@@ -196,7 +654,10 @@ export class App {
   }
 
   protected removeEdit(index: number): void {
-    this.removeWithLiftedParent(index, () => RemoveEdit(index), 'Remove edit');
+    const operation = this.editView() === 'lifted'
+      ? () => RemoveEditView(index, this.hiddenKinds())
+      : () => RemoveEdit(index);
+    this.removeWithLiftedParent(index, operation, 'Remove edit');
   }
 
   protected removeEditSubtree(index: number): void {
@@ -204,19 +665,8 @@ export class App {
   }
 
   private removeWithLiftedParent(index: number, operation: () => Promise<unknown>, label: string): void {
-    const current = this.snapshot();
-    const edit = current?.edits[index];
-    const parentIndex = this.editView() === 'lifted' && edit?.parentId
-      ? current?.edits.findIndex((candidate) => candidate.nodeId === edit.parentId && this.isLiftedShell(candidate))
-      : -1;
     operation().then((snapshot) => {
-      const next = snapshot as ProgramSnapshot;
-      const emptyShellParent = parentIndex !== undefined && parentIndex >= 0 && next.status[parentIndex] === 'applied' && !this.shellHasAppliedChildren(next, parentIndex);
-      if (!emptyShellParent) {
-        this.setSnapshot(next, label, index);
-        return;
-      }
-      return RemoveEdit(parentIndex).then((cleaned) => this.setSnapshot(cleaned as ProgramSnapshot, `${label} wrapper`, index));
+      this.setSnapshot(snapshot as ProgramSnapshot, label, index);
     }).catch((error: Error) => this.error.set(error.message));
   }
 
@@ -295,12 +745,23 @@ export class App {
 
   protected toggleLiftedShell(kind: string, enabled: boolean): void {
     this.liftedShells.update((current) => ({ ...current, [kind]: enabled }));
+    this.refreshProjectedEdits();
+  }
+
+  protected setEditView(view: 'ast' | 'lifted'): void {
+    this.editView.set(view);
+    this.refreshProjectedEdits();
   }
 
   @HostListener('window:keydown', ['$event'])
   protected handleKeyboard(event: KeyboardEvent): void {
     const target = event.target as HTMLElement | null;
     if (target?.matches('input, textarea, select, button, [contenteditable="true"]')) {
+      return;
+    }
+    const current = this.snapshot();
+    if (current?.exploration) {
+      this.handleExplorerKeyboard(event, current);
       return;
     }
     const rows = this.visibleEditRows();
@@ -351,6 +812,47 @@ export class App {
     }
   }
 
+  private handleExplorerKeyboard(event: KeyboardEvent, current: ProgramSnapshot): void {
+    const isFile = Boolean(current.fileName);
+    const isPackage = Boolean(current.packageName) && !isFile;
+    const items = isFile ? this.visibleDeclarationItems(current.declarations) : isPackage ? (this.packageLens() === 'api' ? this.exportedApiRows(current.files) : current.files ?? []) : current.packages ?? [];
+    if (items.length === 0) {
+      return;
+    }
+    const selection = Math.min(this.explorerSelection(), items.length - 1);
+    if (event.key === 'j' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      this.explorerSelection.set(Math.min(selection + 1, items.length - 1));
+      return;
+    }
+    if (event.key === 'k' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      this.explorerSelection.set(Math.max(selection - 1, 0));
+      return;
+    }
+    if (event.key === 'h' || event.key === 'Escape') {
+      event.preventDefault();
+      if (isFile) this.backToFiles();
+      else if (isPackage) this.backToPackages();
+      return;
+    }
+    if (event.key === 'Enter' || event.key === 'l') {
+      event.preventDefault();
+      if (isFile) this.selectDeclaration((items as DeclarationSummary[])[selection]);
+      if (isPackage) {
+        if (this.packageLens() === 'api') this.openApiRow((items as PackageApiRow[])[selection]);
+        else this.openFile((items as FileSummary[])[selection]);
+      }
+      else this.openPackage((items as PackageSummary[])[selection]);
+      return;
+    }
+    if (event.key === ' ') {
+      event.preventDefault();
+      if (isPackage) this.toggleFile((items as FileSummary[])[selection], event);
+      else if (!isFile) this.togglePackage((items as PackageSummary[])[selection], event);
+    }
+  }
+
   private toggleEdit(index: number): void {
     if (this.snapshot()?.status[index] === 'applied') {
       this.removeEdit(index);
@@ -376,90 +878,25 @@ export class App {
   }
 
   protected visibleEditRows(): EditView[] {
+    return this.editRows();
+  }
+
+  private hiddenKinds(): string[] {
     if (this.editView() === 'ast') {
-      return this.editRows();
-    }
-
-    const current = this.snapshot();
-    if (!current) {
       return [];
     }
-    const children = new Map<string, number[]>();
-    current.edits.forEach((edit, index) => {
-      if (edit.parentId) {
-        children.set(edit.parentId, [...(children.get(edit.parentId) ?? []), index]);
-      }
-    });
-    const knownNodes = new Set(current.edits.map((edit) => edit.nodeId));
-    const rows: EditView[] = [];
-    const append = (index: number, depth: number): void => {
-      const edit = current.edits[index];
-      const childIndexes = children.get(edit.nodeId) ?? [];
-      if (this.isLiftedShell(edit)) {
-        childIndexes.forEach((childIndex) => append(childIndex, depth));
-        return;
-      }
-      rows.push({
-        ...edit,
-        index,
-        depth,
-        hasChildren: childIndexes.length > 0,
-        descendantCount: this.countEditDescendants(edit.nodeId, children),
-      });
-      if (childIndexes.length > 0 && this.expandedEdits()[index] === true) {
-        childIndexes.forEach((childIndex) => append(childIndex, depth + 1));
-      }
-    };
-    current.edits.forEach((edit, index) => {
-      if (!edit.parentId || !knownNodes.has(edit.parentId)) {
-        append(index, 0);
-      }
-    });
-    return rows;
+    return Object.entries(this.liftedShells()).filter(([, enabled]) => enabled).map(([kind]) => kind);
   }
 
-  private isLiftedShell(edit: EditRow): boolean {
-    if (this.isLiftedShellEnabled(edit.nodeKind) && this.isLiftedShellNode(edit.nodeKind)) {
-      return true;
+  private refreshProjectedEdits(): void {
+    if (!this.snapshot()) {
+      return;
     }
-    return this.isLiftedShellEnabled(edit.nodeKind) && edit.nodeKind === '*ast.BlockStmt' && edit.field !== 'List';
-  }
-
-  private isLiftedShellNode(nodeKind: string): boolean {
-    return nodeKind === '*ast.ExprStmt' || nodeKind === '*ast.DeclStmt' || nodeKind === '*ast.ImportSpec' || nodeKind === '*ast.FieldList' || nodeKind === '*ast.Field';
-  }
-
-  private liftedAncestorIndexes(index: number): number[] {
-    const current = this.snapshot();
-    if (!current) {
-      return [];
-    }
-    const ancestors: number[] = [];
-    let parentId = current.edits[index]?.parentId;
-    while (parentId) {
-      const parentIndex = current.edits.findIndex((edit) => edit.nodeId === parentId);
-      if (parentIndex < 0) {
-        break;
-      }
-      if (!this.isLiftedShell(current.edits[parentIndex])) {
-        break;
-      }
-      ancestors.unshift(parentIndex);
-      parentId = current.edits[parentIndex].parentId;
-    }
-    return ancestors;
-  }
-
-  private shellHasAppliedChildren(snapshot: ProgramSnapshot, parentIndex: number): boolean {
-    const parentId = snapshot.edits[parentIndex].nodeId;
-    return snapshot.edits.some((edit, index) => edit.parentId === parentId && (snapshot.status[index] === 'applied' || snapshot.status[index] === 'prepared'));
-  }
-
-  private countEditDescendants(nodeId: string, children: Map<string, number[]>): number {
-    return (children.get(nodeId) ?? []).reduce((total, childIndex) => {
-      const child = this.snapshot()?.edits[childIndex];
-      return total + 1 + (child ? this.countEditDescendants(child.nodeId, children) : 0);
-    }, 0);
+    ProjectEdits(this.hiddenKinds()).then((projected) => {
+      const current = this.snapshot();
+      if (!current) return;
+      this.setProjectedViews(current, projected as ProjectedEdit[]);
+    }).catch((error: Error) => this.error.set(error.message));
   }
 
   protected functionEditCount(edit: EditView): number {
@@ -510,6 +947,7 @@ export class App {
     this.snapshot.set(snapshot);
     this.selectedCandidates.set({});
     this.rebuildViews(snapshot);
+    this.refreshProjectedEdits();
   }
 
   private rebuildViews(snapshot: ProgramSnapshot | null): void {
@@ -520,38 +958,28 @@ export class App {
       return;
     }
 
-    const children = new Map<string, number[]>();
-    snapshot.edits.forEach((edit, index) => {
-      if (edit.parentId) {
-        children.set(edit.parentId, [...(children.get(edit.parentId) ?? []), index]);
-      }
-    });
-    const knownNodes = new Set(snapshot.edits.map((edit) => edit.nodeId));
-    const countDescendants = (nodeId: string): number => {
-      const descendants = children.get(nodeId) ?? [];
-      return descendants.reduce((total, childIndex) => total + 1 + countDescendants(snapshot.edits[childIndex].nodeId), 0);
-    };
-    const rows: EditView[] = [];
-    const appendEdit = (index: number, depth: number): void => {
-      const edit = snapshot.edits[index];
-      const childIndexes = children.get(edit.nodeId) ?? [];
-      rows.push({ ...edit, index, depth, hasChildren: childIndexes.length > 0, descendantCount: countDescendants(edit.nodeId) });
-      if (childIndexes.length > 0 && this.expandedEdits()[index] === true) {
-        childIndexes.forEach((childIndex) => appendEdit(childIndex, depth + 1));
-      }
-    };
-    snapshot.edits.forEach((edit, index) => {
-      if (!edit.parentId || !knownNodes.has(edit.parentId)) {
-        appendEdit(index, 0);
-      }
-    });
-    this.editRows.set(rows);
+    this.setProjectedViews(snapshot, snapshot.editViews ?? []);
     const visibleIndexes = this.visibleEditRows().map((edit) => edit.index);
     if (!visibleIndexes.includes(this.selectedEditIndex() ?? -1)) {
       this.selectedEditIndex.set(visibleIndexes[0] ?? null);
     }
     this.astJson.set(snapshot.working ? JSON.stringify(snapshot.working, null, 2) : '');
     this.structuralIssues.set(this.findStructuralIssues(snapshot));
+  }
+
+  private setProjectedViews(snapshot: ProgramSnapshot, projected: ProjectedEdit[]): void {
+    const rows = projected.map((view) => ({
+      ...snapshot.edits[view.editIndex],
+      index: view.editIndex,
+      depth: view.depth,
+      hasChildren: view.hasChildren,
+      descendantCount: view.descendantCount,
+    }));
+    this.editRows.set(rows);
+    const visibleIndexes = rows.map((edit) => edit.index);
+    if (!visibleIndexes.includes(this.selectedEditIndex() ?? -1)) {
+      this.selectedEditIndex.set(visibleIndexes[0] ?? null);
+    }
   }
 
   protected issuesForEdit(index: number): StructuralIssue[] {

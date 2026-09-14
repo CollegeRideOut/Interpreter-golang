@@ -1,5 +1,23 @@
 export namespace engine {
 	
+	export class EditView {
+	    editIndex: number;
+	    depth: number;
+	    hasChildren: boolean;
+	    descendantCount: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new EditView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.editIndex = source["editIndex"];
+	        this.depth = source["depth"];
+	        this.hasChildren = source["hasChildren"];
+	        this.descendantCount = source["descendantCount"];
+	    }
+	}
 	export class ReconciliationCandidate {
 	    nodeId: string;
 	    nodeGlobalId: string;
@@ -149,6 +167,165 @@ export namespace engine {
 
 }
 
+export namespace explorer {
+	
+	export class Declaration {
+	    kind: string;
+	    name: string;
+	    receiver?: string;
+	    line: number;
+	    endLine: number;
+	    exported: boolean;
+	    children?: Declaration[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Declaration(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.name = source["name"];
+	        this.receiver = source["receiver"];
+	        this.line = source["line"];
+	        this.endLine = source["endLine"];
+	        this.exported = source["exported"];
+	        this.children = this.convertValues(source["children"], Declaration);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class File {
+	    name: string;
+	    path: string;
+	    declarations?: Declaration[];
+	    imports?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new File(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.declarations = this.convertValues(source["declarations"], Declaration);
+	        this.imports = source["imports"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ImportSummary {
+	    path: string;
+	    name: string;
+	    directory: string;
+	    files?: File[];
+	    declarations?: Declaration[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ImportSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.name = source["name"];
+	        this.directory = source["directory"];
+	        this.files = this.convertValues(source["files"], File);
+	        this.declarations = this.convertValues(source["declarations"], Declaration);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class Package {
+	    name: string;
+	    directory: string;
+	    fileCount: number;
+	    files?: File[];
+	    localImports?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Package(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.directory = source["directory"];
+	        this.fileCount = source["fileCount"];
+	        this.files = this.convertValues(source["files"], File);
+	        this.localImports = source["localImports"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace main {
 	
 	export class ProgramCandidate {
@@ -195,6 +372,23 @@ export namespace main {
 	    diagnostics?: string[];
 	    renderDiagnostics?: string[];
 	    candidates?: ProgramCandidate[];
+	    editViews: engine.EditView[];
+	    exploration: boolean;
+	    packages?: explorer.Package[];
+	    packageName?: string;
+	    packageDirectory: string;
+	    fileName?: string;
+	    filePath?: string;
+	    declarations?: explorer.Declaration[];
+	    fileSource?: string;
+	    declarationName?: string;
+	    declarationSource?: string;
+	    localImports?: string[];
+	    imports?: explorer.ImportSummary[];
+	    importedFileName?: string;
+	    importedSource?: string;
+	    importedName?: string;
+	    files?: explorer.File[];
 	
 	    static createFrom(source: any = {}) {
 	        return new ProgramSnapshot(source);
@@ -213,6 +407,23 @@ export namespace main {
 	        this.diagnostics = source["diagnostics"];
 	        this.renderDiagnostics = source["renderDiagnostics"];
 	        this.candidates = this.convertValues(source["candidates"], ProgramCandidate);
+	        this.editViews = this.convertValues(source["editViews"], engine.EditView);
+	        this.exploration = source["exploration"];
+	        this.packages = this.convertValues(source["packages"], explorer.Package);
+	        this.packageName = source["packageName"];
+	        this.packageDirectory = source["packageDirectory"];
+	        this.fileName = source["fileName"];
+	        this.filePath = source["filePath"];
+	        this.declarations = this.convertValues(source["declarations"], explorer.Declaration);
+	        this.fileSource = source["fileSource"];
+	        this.declarationName = source["declarationName"];
+	        this.declarationSource = source["declarationSource"];
+	        this.localImports = source["localImports"];
+	        this.imports = this.convertValues(source["imports"], explorer.ImportSummary);
+	        this.importedFileName = source["importedFileName"];
+	        this.importedSource = source["importedSource"];
+	        this.importedName = source["importedName"];
+	        this.files = this.convertValues(source["files"], explorer.File);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

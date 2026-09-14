@@ -162,6 +162,46 @@ There must be no hidden AI edit path. A model's explanation is not evidence of
 intent. The system should distinguish observed facts, AI hypotheses, requested
 transformations, and verified results.
 
+## Structural Contracts For Agent Loops
+
+The engine should eventually give an AI or ACP-connected agent a structural
+interface for requesting and correcting edits. The human can state an
+observable goal:
+
+```text
+Explore functions X and Y.
+The top-level AST must export these four functions.
+The functions must satisfy interface Z.
+The implementation must call this package from that file.
+```
+
+The engine turns the goal into conditions and checks each working revision:
+
+```text
+required exports: satisfied
+required interface: missing method
+required package reference: present
+required call relationship: wrong target
+```
+
+The agent can then iterate through bounded edits, but it does not judge its own
+success:
+
+```text
+human states contract
+    -> agent proposes edit
+        -> engine applies a working revision
+            -> engine verifies structural conditions
+                -> agent receives exact failures
+                    -> next proposed edit
+```
+
+The engine may say that the AST does not export the required declarations, that
+a call reaches the wrong package, or that an interface method is missing. The
+human owns the contract and decides whether a revision is accepted. The engine
+is authoritative only for facts it can observe; semantic behavior and
+architectural intent remain explicit hypotheses.
+
 ## Structural Core
 
 The UI is a view over an authoritative structural engine. The initial operations
@@ -276,6 +316,10 @@ already has useful parsing, structural edit, package, file, and import
 mechanics, but its Angular UI is being reorganized from special-cased panes to
 reusable columns. Reference, call, type, impact, and durable branching support
 remain future work.
+
+The longer-term boundary is a headless inquiry and transformation API. Angular,
+the CLI, MCP, an editor plugin, or an ACP client should be replaceable clients
+over the same facts, relationships, working revisions, and edit history.
 
 The project should keep mechanics that help a person understand and direct a
 working state. If more controls do not improve that loop, the project should be

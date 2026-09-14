@@ -131,6 +131,70 @@ useful artifact is the visible path from one program state to another:
 - Diagnostics and verification results.
 - Provenance back to the original fragment and operation.
 
+## Structural Contracts For AI Work
+
+The structural engine can give AI a better interface for requesting edits than
+an unconstrained text prompt and a large patch. A human can describe the
+desired observable shape of the result:
+
+```text
+Explore functions X and Y.
+The resulting top-level AST must export these four functions.
+The functions must satisfy interface Z.
+The implementation must call this package from that file.
+```
+
+The engine can turn that request into explicit structural conditions and check
+each proposed working state:
+
+```text
+required exported declarations: 4
+required interface: satisfied
+required package reference: missing
+required call relationship: wrong target
+```
+
+The AI or an ACP-connected agent can then iterate:
+
+```text
+human states structural goal
+    -> agent proposes an edit
+        -> engine applies it to a working revision
+            -> engine checks the structural contract
+                -> agent receives exact failures
+                    -> agent proposes the next bounded edit
+```
+
+This creates a useful agent loop without asking the agent to decide whether
+its own result is correct. The engine can say:
+
+```text
+No. The AST still does not export the required four functions.
+The call from X goes to the wrong package.
+The interface method is missing.
+```
+
+The human remains the authority over the contract and whether a revision is
+accepted. The engine is the structural judge for facts it can observe. The AI
+is an iterative operator that attempts to satisfy the contract.
+
+This is different from asking an agent to produce a patch and trusting its
+summary. The useful loop is:
+
+```text
+desired structural contract
+    -> proposed transformation
+        -> concrete AST edits
+            -> verified or failed conditions
+                -> next transformation
+```
+
+Contracts should begin with observable conditions such as declarations,
+exports, signatures, interface methods, package membership, imports, calls, and
+source locations. Semantic behavior, architectural intent, and requirements
+the engine cannot observe must remain explicit human or AI hypotheses rather
+than being presented as verified facts.
+
 ## Current Prototype
 
 The repository currently contains experiments for:

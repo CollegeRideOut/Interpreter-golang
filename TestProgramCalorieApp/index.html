@@ -4,9 +4,65 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Calories</title>
+  <style>
+    body { font: 16px system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; }
+    form { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
+    input, button { padding: 8px; }
+    #app { display: none; }
+    #message { min-height: 1.5em; }
+  </style>
 </head>
 <body>
   <h1>Calorie counter</h1>
   <p>Track breakfast, lunch, dinner, and snacks against your daily target.</p>
+  <section id="auth">
+    <h2>Sign in</h2>
+    <form id="auth-form">
+      <input id="username" placeholder="Username" required>
+      <input id="password" type="password" placeholder="Password" required>
+      <button formaction="login">Log in</button>
+      <button formaction="register">Register</button>
+    </form>
+  </section>
+  <section id="app">
+    <h2 id="welcome"></h2>
+    <p id="summary"></p>
+    <button id="refresh">Refresh today</button>
+  </section>
+  <p id="message"></p>
+  <script>
+    const auth = document.querySelector('#auth-form');
+    const message = document.querySelector('#message');
+    const tokenKey = 'calorie-token';
+
+    async function submitAuth(event) {
+      event.preventDefault();
+      const action = event.submitter.formAction.endsWith('/register') ? 'register' : 'login';
+      const response = await fetch('/api/' + action, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({username: username.value, password: password.value})
+      });
+      const body = await response.text();
+      let data;
+      try { data = JSON.parse(body); } catch { data = null; }
+      if (!response.ok) { message.textContent = data || body || 'Unable to authenticate'; return; }
+      localStorage.setItem(tokenKey, data.token);
+      await loadToday(data.user.username);
+    }
+
+    async function loadToday(username) {
+      const response = await fetch('/api/summary', {headers: {'Authorization': 'Bearer ' + localStorage.getItem(tokenKey)}});
+      if (!response.ok) { localStorage.removeItem(tokenKey); message.textContent = 'Please log in again'; return; }
+      const data = await response.json();
+      document.querySelector('#auth').style.display = 'none';
+      document.querySelector('#app').style.display = 'block';
+      document.querySelector('#welcome').textContent = 'Today for ' + username;
+      document.querySelector('#summary').textContent = `${data.consumed} calories consumed, ${data.remaining} remaining.`;
+      message.textContent = '';
+    }
+
+    auth.addEventListener('submit', submitAuth);
+    refresh.addEventListener('click', () => loadToday(document.querySelector('#welcome').textContent.replace('Today for ', '')));
+  </script>
 </body>
 </html>

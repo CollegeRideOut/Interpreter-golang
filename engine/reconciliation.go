@@ -278,7 +278,7 @@ func structuralInsertPosition(working, parent, targetParent, targetNode *structu
 		if candidate == targetNode {
 			return position
 		}
-		current := working.find(candidate.ID)
+		current := findGlobalOrPath(working, candidate.GlobalID, candidate.ID)
 		if current == nil || current.parent != parent {
 			continue
 		}

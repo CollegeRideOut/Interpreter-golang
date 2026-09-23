@@ -29,16 +29,30 @@ type File struct {
 	Path                  string        `json:"path"`
 	Declarations          []Declaration `json:"declarations,omitempty"`
 	Imports               []string      `json:"imports,omitempty"`
+	Occurrences           []Occurrence  `json:"occurrences,omitempty"`
 	SamePackageReferences []Reference   `json:"samePackageReferences,omitempty"`
 }
 
-type Reference struct {
+type Occurrence struct {
+	SymbolID    string `json:"symbolId"`
 	Name        string `json:"name"`
-	Kind        string `json:"kind"`
-	PackagePath string `json:"packagePath"`
-	FilePath    string `json:"filePath"`
-	Declaration string `json:"declaration"`
-	Line        int    `json:"line"`
+	StartLine   int    `json:"startLine"`
+	StartColumn int    `json:"startColumn"`
+	EndLine     int    `json:"endLine"`
+	EndColumn   int    `json:"endColumn"`
+}
+
+type Reference struct {
+	SymbolID      string `json:"symbolId,omitempty"`
+	Name          string `json:"name"`
+	Kind          string `json:"kind"`
+	PackagePath   string `json:"packagePath"`
+	PackageName   string `json:"packageName,omitempty"`
+	PackageDir    string `json:"packageDirectory,omitempty"`
+	FilePath      string `json:"filePath"`
+	Declaration   string `json:"declaration"`
+	Line          int    `json:"line"`
+	ReferenceLine int    `json:"referenceLine,omitempty"`
 }
 
 type ImportSummary struct {
@@ -50,6 +64,7 @@ type ImportSummary struct {
 }
 
 type Declaration struct {
+	SymbolID       string        `json:"symbolId,omitempty"`
 	Kind           string        `json:"kind"`
 	Name           string        `json:"name"`
 	Receiver       string        `json:"receiver,omitempty"`
@@ -152,7 +167,153 @@ func DiscoverPackages(root string) ([]Package, error) {
 		}
 		return packages[i].Directory < packages[j].Directory
 	})
+	for index := range packages {
+		assignSymbolIDs(module, &packages[index])
+	}
+	for index := range packages {
+		annotateOccurrences(root, module, packages, &packages[index])
+	}
 	return packages, nil
+}
+
+func packagePath(module string, pkg Package) string {
+	if pkg.Directory == "" {
+		return module
+	}
+	return module + "/" + filepath.ToSlash(pkg.Directory)
+}
+
+func assignSymbolIDs(module string, pkg *Package) {
+	path := packagePath(module, *pkg)
+	for fileIndex := range pkg.Files {
+		assignDeclarationIDs(path, pkg.Files[fileIndex].Declarations, "")
+	}
+}
+
+func assignDeclarationIDs(packagePath string, declarations []Declaration, parent string) {
+	for index := range declarations {
+		declaration := &declarations[index]
+		declaration.SymbolID = packagePath + "::"
+		if parent != "" {
+			declaration.SymbolID += parent + "."
+		}
+		declaration.SymbolID += declaration.Name
+		assignDeclarationIDs(packagePath, declaration.Children, declaration.SymbolID)
+	}
+}
+
+func annotateOccurrences(root, module string, packages []Package, pkg *Package) {
+	packageSymbols := make(map[string]string)
+	for _, file := range pkg.Files {
+		for _, declaration := range file.Declarations {
+			collectDeclarationSymbols(declaration, packageSymbols)
+		}
+	}
+	for index := range pkg.Files {
+		file := &pkg.Files[index]
+		path := filepath.Join(root, filepath.FromSlash(file.Path))
+		fileSet := goToken.NewFileSet()
+		parsed, err := goParser.ParseFile(fileSet, path, nil, 0)
+		if err != nil {
+			continue
+		}
+		file.Occurrences = occurrencesForFile(parsed, fileSet, packageSymbols)
+	}
+}
+
+func collectDeclarationSymbols(declaration Declaration, symbols map[string]string) {
+	symbols[declaration.Name] = declaration.SymbolID
+	for _, child := range declaration.Children {
+		collectDeclarationSymbols(child, symbols)
+	}
+}
+
+func occurrencesForFile(file *goAst.File, fileSet *goToken.FileSet, packageSymbols map[string]string) []Occurrence {
+	declarationSymbols := make(map[goToken.Pos]string)
+	for _, declaration := range file.Decls {
+		collectDeclarationPositions(declaration, declarationSymbols, packageSymbols)
+	}
+	imports := make(map[string]string)
+	for _, imported := range file.Imports {
+		path, err := strconv.Unquote(imported.Path.Value)
+		if err != nil {
+			continue
+		}
+		name := filepath.Base(path)
+		if imported.Name != nil {
+			name = imported.Name.Name
+		}
+		if name != "_" && name != "." {
+			imports[name] = path
+		}
+	}
+	occurrences := make([]Occurrence, 0)
+	goAst.Inspect(file, func(node goAst.Node) bool {
+		identifier, ok := node.(*goAst.Ident)
+		if !ok {
+			return true
+		}
+		if symbolID, exists := declarationSymbols[identifier.Pos()]; exists {
+			occurrences = append(occurrences, occurrence(fileSet, identifier, symbolID))
+			return true
+		}
+		if selector, isSelector := parentSelector(file, identifier); isSelector && selector.Sel == identifier {
+			if packageIdent, isPackage := selector.X.(*goAst.Ident); isPackage {
+				if importedPath, exists := imports[packageIdent.Name]; exists {
+					occurrences = append(occurrences, occurrence(fileSet, identifier, importedPath+"::"+identifier.Name))
+				}
+				return true
+			}
+		}
+		if symbolID, exists := packageSymbols[identifier.Name]; exists {
+			occurrences = append(occurrences, occurrence(fileSet, identifier, symbolID))
+		}
+		return true
+	})
+	return occurrences
+}
+
+func collectDeclarationPositions(node goAst.Node, positions map[goToken.Pos]string, symbols map[string]string) {
+	switch declaration := node.(type) {
+	case *goAst.FuncDecl:
+		if symbolID, exists := symbols[declaration.Name.Name]; exists {
+			positions[declaration.Name.Pos()] = symbolID
+		}
+	case *goAst.GenDecl:
+		for _, specification := range declaration.Specs {
+			switch specification := specification.(type) {
+			case *goAst.TypeSpec:
+				if symbolID, exists := symbols[specification.Name.Name]; exists {
+					positions[specification.Name.Pos()] = symbolID
+				}
+			case *goAst.ValueSpec:
+				for _, name := range specification.Names {
+					if symbolID, exists := symbols[name.Name]; exists {
+						positions[name.Pos()] = symbolID
+					}
+				}
+			}
+		}
+	}
+}
+
+func parentSelector(root goAst.Node, identifier *goAst.Ident) (*goAst.SelectorExpr, bool) {
+	var result *goAst.SelectorExpr
+	goAst.Inspect(root, func(node goAst.Node) bool {
+		selector, ok := node.(*goAst.SelectorExpr)
+		if ok && selector.Sel == identifier {
+			result = selector
+			return false
+		}
+		return result == nil
+	})
+	return result, result != nil
+}
+
+func occurrence(fileSet *goToken.FileSet, identifier *goAst.Ident, symbolID string) Occurrence {
+	start := fileSet.Position(identifier.Pos())
+	end := fileSet.Position(identifier.End())
+	return Occurrence{SymbolID: symbolID, Name: identifier.Name, StartLine: start.Line, StartColumn: start.Column, EndLine: end.Line, EndColumn: end.Column}
 }
 
 func annotateReferences(root, module string, pkg *Package) {
@@ -219,11 +380,12 @@ func annotateReferences(root, module string, pkg *Package) {
 				return true
 			}
 			target, ok := symbols[identifier.Name]
-			if !ok || target.file == file.Path || seen[target.file+"\x00"+target.decl] {
+			if !ok || seen[target.file+"\x00"+target.decl] {
 				return true
 			}
 			seen[target.file+"\x00"+target.decl] = true
-			file.SamePackageReferences = append(file.SamePackageReferences, Reference{Name: identifier.Name, Kind: target.kind, PackagePath: packagePath, FilePath: target.file, Declaration: target.decl, Line: target.line})
+			position := parsed.fileSet.Position(identifier.Pos())
+			file.SamePackageReferences = append(file.SamePackageReferences, Reference{Name: identifier.Name, Kind: target.kind, PackagePath: packagePath, FilePath: target.file, Declaration: target.decl, Line: target.line, ReferenceLine: position.Line})
 			return true
 		})
 		for _, targetDeclaration := range declarationTypeExpressions(parsed.file.Decls, parsed.fileSet) {

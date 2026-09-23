@@ -1,9 +1,6 @@
 package controllers
 
-import (
-	"encoding/json"
-	"net/http"
-)
+import "net/http"
 
 type CaloriesController struct {
 	foodController *FoodController
@@ -14,6 +11,5 @@ func NewCaloriesController(foodController *FoodController) *CaloriesController {
 }
 
 func (controller *CaloriesController) Remaining(writer http.ResponseWriter, request *http.Request) {
-	writer.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(writer).Encode(controller.foodController.CurrentSummary())
+	controller.foodController.Summary(writer, request)
 }

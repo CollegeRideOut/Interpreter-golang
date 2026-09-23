@@ -30,7 +30,7 @@ func (state *WorkingState) ApplyWithOptions(index int, options ApplyOptions) err
 func (state *WorkingState) prepareStructuralSlotEdits(index int) {
 	parent := state.edits[index]
 	for childIndex, edit := range state.edits {
-		if edit.ParentID != parent.NodeID || state.status[childIndex] == EditApplied {
+		if editParentIdentity(edit) != editIdentity(parent) || state.status[childIndex] == EditApplied {
 			continue
 		}
 		if parent.NodeKind == "*ast.FuncDecl" || parent.NodeKind == "*ast.FuncLit" {
@@ -64,7 +64,7 @@ func (state *WorkingState) ApplySubtree(index int) error {
 			}
 		}
 		for childIndex := range state.edits {
-			if state.edits[childIndex].ParentID == state.edits[current].NodeID {
+			if editParentIdentity(state.edits[childIndex]) == editIdentity(state.edits[current]) {
 				if err := apply(childIndex); err != nil {
 					return err
 				}
@@ -81,9 +81,9 @@ func (state *WorkingState) ApplySiblings(index int) error {
 	if err := state.checkEditIndex(index); err != nil {
 		return err
 	}
-	parentID := state.edits[index].ParentID
+	parentID := editParentIdentity(state.edits[index])
 	for siblingIndex, edit := range state.edits {
-		if edit.ParentID == parentID {
+		if editParentIdentity(edit) == parentID {
 			if err := state.ApplySubtree(siblingIndex); err != nil {
 				return err
 			}
@@ -115,7 +115,7 @@ func (state *WorkingState) RemoveSubtree(index int) error {
 		visited[current] = true
 		state.status[current] = EditRemoved
 		for childIndex := range state.edits {
-			if state.edits[childIndex].ParentID == state.edits[current].NodeID {
+			if editParentIdentity(state.edits[childIndex]) == editIdentity(state.edits[current]) {
 				remove(childIndex)
 			}
 		}
@@ -130,9 +130,9 @@ func (state *WorkingState) RemoveSiblings(index int) error {
 	if err := state.checkEditIndex(index); err != nil {
 		return err
 	}
-	parentID := state.edits[index].ParentID
+	parentID := editParentIdentity(state.edits[index])
 	for siblingIndex, edit := range state.edits {
-		if edit.ParentID == parentID {
+		if editParentIdentity(edit) == parentID {
 			if err := state.RemoveSubtree(siblingIndex); err != nil {
 				return err
 			}

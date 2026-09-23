@@ -23,6 +23,8 @@ type structuralASTNode struct {
 	CurrentField           string `json:"currentField,omitempty"`
 	OriginalIndex          int    `json:"originalIndex,omitempty"`
 	CurrentIndex           int    `json:"currentIndex,omitempty"`
+	StartLine              int    `json:"startLine,omitempty"`
+	EndLine                int    `json:"endLine,omitempty"`
 
 	Kind     string               `json:"kind"`
 	Value    string               `json:"value,omitempty"`
@@ -42,6 +44,8 @@ type structuralEdit struct {
 	ParentID       string             `json:"parentId,omitempty"`
 	ParentGlobalID string             `json:"parentGlobalId,omitempty"`
 	ParentKind     string             `json:"parentKind,omitempty"`
+	AncestorIDs    []string           `json:"ancestorIds,omitempty"`
+	Ancestors      []EditAncestor     `json:"ancestors,omitempty"`
 	Field          string             `json:"field,omitempty"`
 	Position       int                `json:"position"`
 	Value          string             `json:"value,omitempty"`
@@ -70,6 +74,7 @@ func structuralASTNodeFromGo(node goast.Node, fileSet *token.FileSet, id, field 
 		OriginalIndex: index,
 		CurrentIndex:  index,
 	}
+	result.StartLine, result.EndLine = safeNodeLines(fileSet, node)
 	value := reflect.ValueOf(node).Elem()
 	astNodeType := reflect.TypeOf((*goast.Node)(nil)).Elem()
 	for fieldIndex := 0; fieldIndex < value.NumField(); fieldIndex++ {
@@ -103,6 +108,17 @@ func structuralASTNodeFromGo(node goast.Node, fileSet *token.FileSet, id, field 
 		}
 	}
 	return result
+}
+
+func safeNodeLines(fileSet *token.FileSet, node goast.Node) (startLine, endLine int) {
+	defer func() {
+		if recover() != nil {
+			startLine, endLine = 0, 0
+		}
+	}()
+	start := fileSet.Position(node.Pos())
+	end := fileSet.Position(node.End())
+	return start.Line, end.Line
 }
 
 func shallowStructuralNode(node *structuralASTNode) *structuralASTNode {
@@ -329,16 +345,50 @@ func linkStructuralIdentities(source, target *structuralASTNode) {
 
 func bindStructuralEditIdentities(source, target *structuralASTNode, edits []structuralEdit) {
 	for index := range edits {
-		targetNode := target.find(edits[index].NodeID)
+		var sourceNode, targetNode *structuralASTNode
+		switch edits[index].Kind {
+		case "DELETE":
+			sourceNode = source.find(edits[index].NodeID)
+		case "INSERT":
+			targetNode = target.find(edits[index].NodeID)
+		default:
+			targetNode = target.find(edits[index].NodeID)
+			if targetNode != nil {
+				sourceNode = source.findGlobal(targetNode.GlobalID)
+			}
+		}
+		node := targetNode
+		if edits[index].Kind == "DELETE" {
+			node = sourceNode
+		}
 		if targetNode != nil {
 			edits[index].NodeGlobalID = targetNode.GlobalID
 			if targetNode.parent != nil {
 				edits[index].ParentGlobalID = targetNode.parent.GlobalID
 			}
 		}
-		sourceNode := source.find(edits[index].NodeID)
-		if sourceNode != nil && edits[index].Kind != "INSERT" {
+		if sourceNode != nil {
 			edits[index].SourceGlobalID = sourceNode.GlobalID
+			if edits[index].Kind == "DELETE" {
+				edits[index].NodeGlobalID = sourceNode.GlobalID
+				if sourceNode.parent != nil {
+					edits[index].ParentGlobalID = sourceNode.parent.GlobalID
+				}
+			}
+		}
+		if node != nil {
+			ancestors := make([]string, 0)
+			ancestorDetails := make([]EditAncestor, 0)
+			for parent := node.parent; parent != nil; parent = parent.parent {
+				ancestors = append(ancestors, parent.ID)
+				ancestorDetails = append(ancestorDetails, EditAncestor{NodeID: parent.ID, GlobalID: parent.GlobalID, NodeKind: parent.Kind, Field: parent.Field, Value: parent.Value, StartLine: parent.StartLine, EndLine: parent.EndLine})
+			}
+			for left, right := 0, len(ancestors)-1; left < right; left, right = left+1, right-1 {
+				ancestors[left], ancestors[right] = ancestors[right], ancestors[left]
+				ancestorDetails[left], ancestorDetails[right] = ancestorDetails[right], ancestorDetails[left]
+			}
+			edits[index].AncestorIDs = ancestors
+			edits[index].Ancestors = ancestorDetails
 		}
 	}
 }

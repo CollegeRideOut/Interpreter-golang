@@ -1,309 +1,319 @@
 # contuts
 
-`contuts` is an exploratory code-understanding and program-transformation tool.
-It is being built around one question:
+`contuts` is a code-understanding and structural program-transformation tool.
+It is being built for a human who wants to understand a change all the way
+from the repository state to the smallest affected declaration.
 
-> Can a person understand and direct code changes by exploring the code state,
-> the relationships around it, and the concrete edits that move it forward?
+The product is the thing that matters. The architecture matters because it is
+what makes the product trustworthy, understandable, and capable of growing
+without losing its mental model.
 
-The project is intentionally being built as a bad, useful version first. The
-goal is not to predict the perfect architecture before using the tool. The goal
-is to discover an interaction that makes code evolution easier to see.
+AI can make this workflow noisy, repetitive, and frustrating. That is not a
+reason to give up on thinking carefully about the system. A product builder
+should be able to obsess over the architecture, define the model precisely,
+and still use AI as leverage. The human owns the model and the target state.
 
-## The Core Experience
+## Desired Workflow
 
-The main UI is an inquiry path made from identical explorer columns:
+The primary workflow is revision comparison followed by declaration-level
+inquiry.
 
 ```text
-starting code
-    -> imported package
+open a program
+    -> choose the current revision
+    -> choose the revision to compare against
+    -> generate edits
+    -> inspect the complete canonical edit tree
+    -> split edits into declaration inquiries and related columns
+    -> apply, remove, or inspect individual structural edits
+    -> continue exploring the resulting program state
+```
+
+### 1. Open A Program
+
+The initial inquiry opens the program, packages, files, declarations, imports,
+and source representation. It is the starting context, not the final answer.
+
+The explorer is a sequence of equivalent columns:
+
+```text
+program
+    -> package
         -> file
             -> declaration
-                -> callers, callees, dependents, or related code
+                -> import, reference, caller, callee, dependent, or affected code
 ```
 
-The path is not limited to two columns. The leftmost column is the starting
-point. Every question opens another copy of the same explorer to the right.
-Selecting an import, dependent, caller, callee, or affected declaration extends
-the path rather than replacing the current context.
+Opening a target in the current column answers the current question. Opening it
+in a new column preserves the question that led there. Opening it to the left
+connects the result to an earlier context.
 
-Every column should support the same lenses:
+### 2. Choose Two Revisions
+
+The comparison controls remain explicit because generating edits between two
+program states is the central operation.
+
+The current revision may be the working tree or a commit. The comparison
+revision may be a branch or commit. Selecting revisions does not silently
+rewrite the checked-out working tree.
+
+The user then presses **Generate edits**. Edit data is loaded for every known
+file in the inquiry. There is no hidden "show complete file" filter: the
+comparison always presents the complete canonical edit set.
+
+### 3. Read The Complete Edit Tree
+
+The comparison view shows the structural tree, not only a lifted or simplified
+summary:
+
+```text
+file
+    -> declaration/specification
+        -> changed AST node
+            -> changed child
+                -> changed descendant
+```
+
+Every canonical edit keeps its identity, parent identity, ancestor path, source
+location, operation kind, and application status. A structural replacement may
+require related child operations; those relationships remain visible.
+
+The complete tree is important because a file can contain several independent
+functions, methods, types, literals, fields, or expressions. Showing only one
+lifted operation loses the causal structure needed to understand and control
+the change.
+
+## Inquiry And Column Rules
+
+The unit of organization is not merely the file. Files are containers; the
+meaningful inquiry boundary is the declaration and its structural ancestry.
+
+### Separate Inquiries
+
+Create separate inquiries when edits are independent siblings:
+
+- Two top-level functions changed independently.
+- Two methods changed independently.
+- Two top-level types changed independently.
+- Two unrelated declarations in the same file changed independently.
+- Changes in unrelated files have no edited declaration ancestor connecting them.
+
+Each inquiry should be named after the narrowest meaningful declaration when
+possible, such as `function Remaining` or `struct Server`, and should retain
+the source file as context.
+
+The desired shape is:
+
+```text
+inquiry: function First
+    controllers/example.go
+
+inquiry: function Second
+    controllers/example.go
+```
+
+These are not two file-level copies of the same change. They are two declaration
+stories in the same file.
+
+### Same Inquiry, Separate Columns
+
+Keep edits in one inquiry when they share an edited ancestor, but use columns
+for independent cousin branches below that ancestor.
+
+```text
+inquiry: function Build
+
+column 1: edited Build parent -> branch A
+column 2: edited Build parent -> branch B
+```
+
+This applies recursively. If two edits are siblings and their parent is also
+edited, the parent establishes the shared inquiry and the sibling branches are
+separate columns. If the shared edited ancestor is a grandparent, cousin edits
+under that grandparent remain one inquiry with separate columns.
+
+The rule is based on AST identity and ancestry, not just line ranges or file
+names:
+
+```text
+same edited declaration or ancestor -> same inquiry
+independent sibling declaration    -> separate inquiry
+same edited ancestor, cousin branch -> separate columns
+no declaration ancestor             -> file-level fallback inquiry
+```
+
+### Declaration Boundaries
+
+Grouping must descend at least to declaration-level nodes. The relevant
+boundaries include:
+
+- Functions.
+- Methods.
+- Type declarations.
+- Struct and interface declarations.
+- Constants and variables.
+- Import declarations when no more meaningful declaration owns the edit.
+- Nested declarations and their AST descendants.
+
+An edit inside a function body belongs to that function inquiry. An edit inside
+a method belongs to that method inquiry, even when the method is attached to a
+type. An edit inside a type specification belongs to the type inquiry. Only
+edits that cannot be associated with a declaration use the file as their
+fallback context.
+
+## Applying Edits
+
+Every edit is individually inspectable and controllable:
+
+```text
+unapplied
+    -> apply
+        -> prepared/applied
+    -> remove
+        -> unapplied/removed
+```
+
+Applying a child may require materializing an edited ancestor. That does not
+erase the canonical child edit. Removing an edit must remove only the requested
+operation and any temporary projected structure that exists solely to support
+it.
+
+The engine distinguishes:
+
+- Canonical edits: the complete source-to-target edit set.
+- Lifted edits: a useful projection for compact views.
+- Projected application: the concrete operations required to materialize one
+  selected canonical edit.
+- Rendered working code: the current intermediate program representation.
+
+The UI may offer a convenient replacement action for a delete, but the
+underlying operation remains structural and traceable.
+
+## Explorer Workflow
+
+The comparison workflow and dependency workflow are connected but distinct.
+The explorer answers questions about code relationships:
+
+```text
+start here
+    -> why does this depend on that?
+    -> where is this declaration used?
+    -> what calls this function?
+    -> what changed inside this declaration?
+    -> what related declaration should I inspect next?
+```
+
+Every column should expose the same basic lenses:
 
 - Packages and files.
-- Declarations and exported API.
+- All declarations.
+- Exported API.
 - Source code.
 - Imports and references.
-- Callers and callees when analysis is available.
-- Dependents and affected code when analysis is available.
-- Structural AST details and exact edit context.
+- Callers and callees when available.
+- Dependents and affected code when available.
+- Structural edits and exact edit context.
 
-The user should always be able to tell why a column exists. The originating
-item remains highlighted, and the selected item in the next column is
-highlighted as the answer to that question.
+Repeated targets are marked as previously opened instead of silently creating a
+confusing cycle. Unrelated questions start a separate inquiry rather than
+polluting the current path.
 
-Loops are expected in real code. A repeated target should be marked as
-`Previously opened` instead of silently creating a confusing cycle. Unrelated
-questions should start a separate inquiry path or explorer row rather than
-polluting the current one.
+## Structural AST Model
 
-## Edit Evolution
+The engine parses Go into a structural tree and tracks identity across source
+and target revisions. Numeric indexes and raw AST pointers are not durable
+identities. Edits therefore retain:
 
-Dependency exploration and edit exploration are connected, but they are not
-the same view.
-
-When edits are proposed or applied, the tool should show the relevant evolution
-as a clear line of sight:
-
-```text
-parent edit
-    -> child edit
-        -> affected declaration
-            -> resulting source
-                -> next related change
-```
-
-The sequence should follow the related parent-to-child chain. Completely
-unrelated edits should not appear in the current story; they belong in another
-edit lane or inquiry path.
-
-Each edit remains independently controllable. A parent operation is only a
-convenient grouping. The materialized child edits are the actual operations and
-can be applied, removed, inspected, or changed separately.
-
-The value is not dependent on rejecting AI work. Even if the user applies every
-proposal, walking through each transition makes the change understandable:
-
-```text
-AI proposal
-    -> parent AST edit
-        -> child edit
-            -> changed declaration
-                -> affected type or reference
-                    -> next working revision
-```
-
-If the user rejects or changes a child, the next revision branches from the
-state they chose. Applying an edit is therefore both an authorization and a way
-to observe the next program state.
-
-Every edit should eventually retain a causal thread:
-
-- Edit and parent edit identity.
-- Source and destination AST identities.
-- Before and after state.
-- Affected declarations and relationships.
+- Node identity and global identity.
+- Source and target identity where both exist.
+- Parent and ancestor identity.
+- AST field and position.
+- Source line range.
+- Operation kind and status.
+- Render diagnostics.
 - Working-state revision.
-- Diagnostics and verification results.
 
-The UI should present direct changes, related references, potential effects, and
-verified results as different kinds of evidence. It should not collapse them
-into an unqualified claim that an entire subsystem is affected.
+The renderer must preserve useful syntax for common Go nodes, including type
+specifications, composite literals, key/value elements, arrays, maps, structs,
+interfaces, functions, and their nested expressions. Incomplete intermediate
+states are allowed, but they should be rendered with explicit diagnostics
+rather than silently discarded.
 
-## Human Direction, AI Leverage
+Parsing, rendering, compilation, type checking, and tests are observations of a
+program state. They should inform the next inquiry, not erase the state.
 
-The human chooses the target state and the next question. AI can locate code,
-propose a transformation, or explain an observed relationship, but it must not
-silently decide what becomes part of the working state.
+## Human Direction And AI Leverage
+
+The human chooses the target state, the revisions, the inquiry boundaries, and
+which edits are accepted. AI may locate code, propose an edit, explain a
+relationship, or iterate toward a structural contract. AI must not silently
+decide what becomes part of the working program.
 
 ```text
-Human chooses a target or question
-        |
-        v
-AI proposes a bounded operation or analysis
-        |
-        v
-contuts shows the relationship and concrete edits
-        |
-        v
-Human accepts, rejects, changes, or continues the inquiry
-        |
-        v
-The working program enters a chosen state
+human defines the goal
+    -> AI proposes a bounded operation
+    -> contuts exposes the exact AST edits
+    -> human inspects declaration and ancestry grouping
+    -> human applies, removes, or changes an edit
+    -> contuts renders and verifies the resulting state
 ```
 
 The product is not primarily an AI summary viewer. A summary is a claim. The
-useful artifact is the visible path from one program state to another:
+valuable artifact is the visible path from one program state to another:
 
-- The source location or structural node.
+- The source location.
+- The declaration that owns the change.
 - The relationship that caused it to be shown.
-- The exact edit or proposed edit.
+- The complete structural edit tree.
 - The resulting working source.
 - Diagnostics and verification results.
-- Provenance back to the original fragment and operation.
+- Provenance back to the original operation.
 
-## Structural Contracts For AI Work
-
-The structural engine can give AI a better interface for requesting edits than
-an unconstrained text prompt and a large patch. A human can describe the
-desired observable shape of the result:
-
-```text
-Explore functions X and Y.
-The resulting top-level AST must export these four functions.
-The functions must satisfy interface Z.
-The implementation must call this package from that file.
-```
-
-The engine can turn that request into explicit structural conditions and check
-each proposed working state:
-
-```text
-required exported declarations: 4
-required interface: satisfied
-required package reference: missing
-required call relationship: wrong target
-```
-
-The AI or an ACP-connected agent can then iterate:
-
-```text
-human states structural goal
-    -> agent proposes an edit
-        -> engine applies it to a working revision
-            -> engine checks the structural contract
-                -> agent receives exact failures
-                    -> agent proposes the next bounded edit
-```
-
-This creates a useful agent loop without asking the agent to decide whether
-its own result is correct. The engine can say:
-
-```text
-No. The AST still does not export the required four functions.
-The call from X goes to the wrong package.
-The interface method is missing.
-```
-
-The human remains the authority over the contract and whether a revision is
-accepted. The engine is the structural judge for facts it can observe. The AI
-is an iterative operator that attempts to satisfy the contract.
-
-This is different from asking an agent to produce a patch and trusting its
-summary. The useful loop is:
-
-```text
-desired structural contract
-    -> proposed transformation
-        -> concrete AST edits
-            -> verified or failed conditions
-                -> next transformation
-```
-
-Contracts should begin with observable conditions such as declarations,
-exports, signatures, interface methods, package membership, imports, calls, and
-source locations. Semantic behavior, architectural intent, and requirements
-the engine cannot observe must remain explicit human or AI hypotheses rather
-than being presented as verified facts.
+The architecture should make that mental model possible. It should be possible
+to ask not only whether a change is good, but exactly which declaration changed,
+which parent made the change necessary, which cousin branch is independent, and
+what state will exist after applying it.
 
 ## Current Prototype
 
 The repository currently contains experiments for:
 
-- Go AST export and field-aware structural diffs.
-- Low-level insert, update, delete, and reconciliation operations.
+- Go AST parsing, export, and field-aware structural diffs.
+- Canonical insert, update, delete, and replacement operations.
+- Parent/ancestor identity and reconciliation.
 - A mutable intermediate working tree.
-- Reversible application and removal of edits.
+- Reversible edit application and removal.
 - Best-effort rendering of incomplete states.
-- Package, file, declaration, and local-import exploration.
-- A Wails desktop UI.
-- Lifted views over some low-level AST operations.
-- Structural error markers for incomplete representations.
-- A multi-package Go fixture for dependency exploration.
+- Declaration, package, file, import, and reference exploration.
+- Declaration-level comparison inquiries and cousin columns in the React UI.
+- A Wails desktop application.
+- A multi-package calorie-app fixture for dependency exploration.
 
-This is not yet a dependable multi-file transformation environment. Reference,
-call, type, and impact analysis are future capabilities. The current UI is a
-prototype and is being reshaped around reusable explorer columns rather than
-special-cased left and right panes. The near-term work is intentionally in the
-UI: make the exploration path and edit evolution useful before attempting to
-fully understand or replace the engine internals.
-
-## Structural Transformation Model
-
-The first transformation model should stay concrete:
-
-```text
-select(anchor)
-capture(subtree)
-replace(target, subtree)
-move(target, destination)
-wrap(target, wrapper)
-substitute(edit, explicit bindings)
-preview(edit)
-apply(edit)
-remove(edit)
-```
-
-AST pointers and numeric indexes are not durable identities. Operations need
-lineage, working-state revisions, structural anchors, and provenance. A copied
-subtree receives a new instance identity while retaining its origin.
-
-The system must distinguish:
-
-```text
-AST diff        -> syntax changed
-References      -> definitions and uses
-Call analysis   -> callers and callees
-Type analysis   -> type observations
-Impact analysis -> code that may observe the change
-```
-
-None of these observations should pretend to be the user's architecture or the
-true intent of an AI system.
-
-## Why Invalid States Matter
-
-The user may intentionally create an incomplete or wrong state in order to
-understand it:
-
-```text
-Create the file.
-Create the declaration.
-Leave the function incomplete.
-See what breaks.
-Ask for a bounded repair.
-Apply only the repair chosen by the human.
-```
-
-Parsing, compilation, type checking, and tests are observations about a state.
-They should inform the next question instead of erasing the state.
+The prototype is not yet a complete multi-file transformation environment.
+Reference, call, type, and impact analysis are still developing. The important
+near-term goal is to make the inquiry and edit model correct and understandable
+before adding more automation.
 
 ## Running It
 
 Run the Go prototype:
 
 ```bash
-go run .
-go run . --interactive
-go test ./...
 ```
 
 Build or test the desktop application:
 
 ```bash
 cd desktop
-go test ./...
-wails build
 ```
 
-The default example uses `TestProgram/main.go`. `TestProgramCalorieApp/` is a
-multi-package fixture for exploring package and import relationships.
+The packaged desktop binary is written to:
 
-## Principles
+```text
+```
 
-- The human owns the target state and the starting point of an inquiry.
-- Every explorer column uses the same code and behavior.
-- A question extends to the right; it does not destroy the question that led to it.
-- Previously opened targets must be visible when loops occur.
-- Unrelated code belongs in a separate path or lane.
-- AI may propose, but does not own execution.
-- Every meaningful operation materializes into visible edits.
-- Repetition creates independently controllable edit instances.
-- Renames and substitutions are explicit.
-- Invalid intermediate states are allowed.
-- Diagnostics are evidence, not authority.
-- Operations are inspectable, reversible, and replayable.
-- High-level views remain connected to low-level edits.
-- The project must be honest about what it cannot know.
+The default example uses `TestProgram/`. `TestProgramCalorieApp/` is a
+multi-package fixture for package, import, declaration, and revision workflows.
 
 ## Product Test
 
@@ -311,17 +321,16 @@ The product is moving in the right direction when a user can say:
 
 ```text
 Start here.
-Why does this depend on that?
-Show me the next code in the path.
-What does this edit affect?
-Show me the edit evolution.
-Keep this change, remove that one, and continue from here.
+Compare these two revisions.
+Generate the complete edits.
+Show me the functions and types affected.
+Separate independent sibling declarations.
+Put cousin branches under the same edited parent into columns.
+Keep this edit, remove that one, and continue from the resulting state.
 ```
 
-If the user can see the code, the relationships, and the chosen working states
-well enough to ask better questions, contuts is doing useful work. No promise
-is made that the current prototype has solved this; the next step is to steer
-the interface through real use and let the useful model emerge.
+If the user can see the code, the declaration boundaries, the ancestry, the
+chosen edits, and the resulting working states, `contuts` is doing useful work.
 
 The older project notes are preserved in [`oldREADME.md`](oldREADME.md),
 [`oldDIRECTION.md`](oldDIRECTION.md), and

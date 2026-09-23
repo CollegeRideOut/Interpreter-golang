@@ -55,3 +55,43 @@ func TestDiscoverPackagesReadsSourceWithoutTests(t *testing.T) {
 		t.Fatalf("same-package references = %+v", use.SamePackageReferences)
 	}
 }
+
+func TestOccurrencesUseImportedPackageAndExactIdentifierIdentity(t *testing.T) {
+	packages, err := DiscoverPackages("../TestProgramCalorieApp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mainFile File
+	var serverFile File
+	for _, pkg := range packages {
+		for _, file := range pkg.Files {
+			if file.Path == "main.go" {
+				mainFile = file
+			}
+			if file.Path == "server/server.go" {
+				serverFile = file
+			}
+		}
+	}
+	foundImportedNew := false
+	for _, occurrence := range mainFile.Occurrences {
+		if occurrence.SymbolID == "calorieapp/server::New" && occurrence.Name == "New" {
+			foundImportedNew = true
+		}
+		if occurrence.Name == "NewController" || occurrence.Name == "NewCaloriesController" {
+			t.Fatalf("unrelated constructor occurrence = %+v", occurrence)
+		}
+	}
+	if !foundImportedNew {
+		t.Fatalf("main occurrences = %+v", mainFile.Occurrences)
+	}
+	foundDeclaration := false
+	for _, occurrence := range serverFile.Occurrences {
+		if occurrence.SymbolID == "calorieapp/server::New" && occurrence.Name == "New" {
+			foundDeclaration = true
+		}
+	}
+	if !foundDeclaration {
+		t.Fatalf("server occurrences = %+v", serverFile.Occurrences)
+	}
+}

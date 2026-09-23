@@ -21,9 +21,9 @@ func ProjectEdits(edits []Edit, options LiftOptions) []EditView {
 	children := make(map[string][]int)
 	known := make(map[string]bool, len(edits))
 	for index, edit := range edits {
-		known[edit.NodeID] = true
-		if edit.ParentID != "" {
-			children[edit.ParentID] = append(children[edit.ParentID], index)
+		known[editIdentity(edit)] = true
+		if parent := editParentIdentity(edit); parent != "" {
+			children[parent] = append(children[parent], index)
 		}
 	}
 
@@ -33,7 +33,7 @@ func ProjectEdits(edits []Edit, options LiftOptions) []EditView {
 			total := 0
 			for _, child := range children[id] {
 				total++
-				total += walk(edits[child].NodeID)
+				total += walk(editIdentity(edits[child]))
 			}
 			return total
 		}
@@ -44,7 +44,7 @@ func ProjectEdits(edits []Edit, options LiftOptions) []EditView {
 	var appendView func(int, int)
 	appendView = func(index, depth int) {
 		edit := edits[index]
-		childIndexes := children[edit.NodeID]
+		childIndexes := children[editIdentity(edit)]
 		if options.HiddenKinds[edit.NodeKind] {
 			for _, child := range childIndexes {
 				appendView(child, depth)
@@ -55,7 +55,7 @@ func ProjectEdits(edits []Edit, options LiftOptions) []EditView {
 			EditIndex:       index,
 			Depth:           depth,
 			HasChildren:     len(childIndexes) > 0,
-			DescendantCount: count(edit.NodeID),
+			DescendantCount: count(editIdentity(edit)),
 		})
 		for _, child := range childIndexes {
 			appendView(child, depth+1)
@@ -63,34 +63,50 @@ func ProjectEdits(edits []Edit, options LiftOptions) []EditView {
 	}
 
 	for index, edit := range edits {
-		if edit.ParentID == "" || !known[edit.ParentID] {
+		parent := editParentIdentity(edit)
+		if parent == "" || !known[parent] {
 			appendView(index, 0)
 		}
 	}
 	return views
 }
 
-// ApplyProjected applies a canonical edit and any hidden ancestors required
-// to make that projected row materializable.
+func editIdentity(edit structuralEdit) string {
+	if edit.NodeGlobalID != "" {
+		return edit.NodeGlobalID
+	}
+	if edit.SourceGlobalID != "" {
+		return edit.SourceGlobalID
+	}
+	return edit.NodeID
+}
+
+func editParentIdentity(edit structuralEdit) string {
+	if edit.ParentGlobalID != "" {
+		return edit.ParentGlobalID
+	}
+	return edit.ParentID
+}
+
+// ApplyProjected applies a canonical edit and any edited ancestors required
+// to make that projected row materializable. Hidden ancestors are included
+// automatically because they are omitted from the projected view.
 func (state *WorkingState) ApplyProjected(index int, options ApplyOptions, lifting LiftOptions) error {
 	if err := state.checkEditIndex(index); err != nil {
 		return err
 	}
 	byNode := make(map[string]int, len(state.edits))
 	for editIndex, edit := range state.edits {
-		byNode[edit.NodeID] = editIndex
+		byNode[editIdentity(edit)] = editIndex
 	}
 	ancestors := make([]int, 0)
-	for parentID := state.edits[index].ParentID; parentID != ""; {
+	for parentID := editParentIdentity(state.edits[index]); parentID != ""; {
 		parentIndex, ok := byNode[parentID]
 		if !ok {
 			break
 		}
-		if !lifting.HiddenKinds[state.edits[parentIndex].NodeKind] {
-			break
-		}
 		ancestors = append(ancestors, parentIndex)
-		parentID = state.edits[parentIndex].ParentID
+		parentID = editParentIdentity(state.edits[parentIndex])
 	}
 	for ancestorIndex := len(ancestors) - 1; ancestorIndex >= 0; ancestorIndex-- {
 		if state.status[ancestors[ancestorIndex]] != EditApplied {
@@ -99,7 +115,36 @@ func (state *WorkingState) ApplyProjected(index int, options ApplyOptions, lifti
 			}
 		}
 	}
-	return state.ApplyWithOptions(index, options)
+	for _, editIndex := range state.replacementEdits(index) {
+		if state.status[editIndex] == EditApplied {
+			continue
+		}
+		if err := state.ApplyWithOptions(editIndex, options); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// replacementEdits keeps a delete/insert pair for the same AST slot together.
+// Applying only one side of a replacement can leave an intermediate tree such
+// as `_ =`, which is useful internally but misleading as a user action.
+func (state *WorkingState) replacementEdits(index int) []int {
+	selected := state.edits[index]
+	indexes := []int{index}
+	for candidateIndex, candidate := range state.edits {
+		if candidateIndex == index || candidate.ParentGlobalID == "" || candidate.ParentGlobalID != selected.ParentGlobalID || candidate.Field != selected.Field || candidate.Position != selected.Position {
+			continue
+		}
+		if (selected.Kind == "DELETE" && candidate.Kind == "INSERT") || (selected.Kind == "INSERT" && candidate.Kind == "DELETE") {
+			if candidate.Kind == "DELETE" {
+				indexes = append([]int{candidateIndex}, indexes...)
+			} else {
+				indexes = append(indexes, candidateIndex)
+			}
+		}
+	}
+	return indexes
 }
 
 // RemoveProjected removes a projected edit and any now-empty hidden
@@ -108,11 +153,19 @@ func (state *WorkingState) RemoveProjected(index int, lifting LiftOptions) error
 	if err := state.Remove(index); err != nil {
 		return err
 	}
+	for _, editIndex := range state.replacementEdits(index) {
+		if editIndex == index || (state.status[editIndex] != EditApplied && state.status[editIndex] != EditPrepared) {
+			continue
+		}
+		if err := state.Remove(editIndex); err != nil {
+			return err
+		}
+	}
 	byNode := make(map[string]int, len(state.edits))
 	for editIndex, edit := range state.edits {
-		byNode[edit.NodeID] = editIndex
+		byNode[editIdentity(edit)] = editIndex
 	}
-	for parentID := state.edits[index].ParentID; parentID != ""; {
+	for parentID := editParentIdentity(state.edits[index]); parentID != ""; {
 		parentIndex, ok := byNode[parentID]
 		if !ok || !lifting.HiddenKinds[state.edits[parentIndex].NodeKind] {
 			break
@@ -123,14 +176,14 @@ func (state *WorkingState) RemoveProjected(index int, lifting LiftOptions) error
 		if err := state.Remove(parentIndex); err != nil {
 			return err
 		}
-		parentID = state.edits[parentIndex].ParentID
+		parentID = editParentIdentity(state.edits[parentIndex])
 	}
 	return nil
 }
 
 func (state *WorkingState) hasAppliedChildren(parentID string) bool {
 	for index, edit := range state.edits {
-		if edit.ParentID == parentID && (state.status[index] == EditApplied || state.status[index] == EditPrepared) {
+		if editParentIdentity(edit) == parentID && (state.status[index] == EditApplied || state.status[index] == EditPrepared) {
 			return true
 		}
 	}

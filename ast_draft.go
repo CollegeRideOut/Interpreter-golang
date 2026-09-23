@@ -211,6 +211,12 @@ func renderDraftNode(node *draftNode) string {
 			return "import (\n" + indent(join("spec", "\n")) + "\n)"
 		}
 		return string(node.value) + " " + join("spec", "\n")
+	case "*ast.TypeSpec":
+		return join("name", "") + " " + join("type", "")
+	case "*ast.CompositeLit":
+		return join("type", "") + "{" + join("elt", ", ") + "}"
+	case "*ast.KeyValueExpr":
+		return join("key", "") + ": " + join("value", "")
 	case "*ast.ImportSpec":
 		return join("name", " ") + join("path", "")
 	case "*ast.FuncDecl":
@@ -270,6 +276,21 @@ func draftChildRole(parent, child goast.Node, index int) string {
 		return "decl"
 	case *goast.GenDecl:
 		return "spec"
+	case *goast.TypeSpec:
+		if child == parent.Name {
+			return "name"
+		}
+		return "type"
+	case *goast.CompositeLit:
+		if child == parent.Type {
+			return "type"
+		}
+		return "elt"
+	case *goast.KeyValueExpr:
+		if child == parent.Key {
+			return "key"
+		}
+		return "value"
 	case *goast.ImportSpec:
 		if child == parent.Name {
 			return "name"

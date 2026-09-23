@@ -23,6 +23,8 @@ type structuralASTNode struct {
 	CurrentField           string `json:"currentField,omitempty"`
 	OriginalIndex          int    `json:"originalIndex,omitempty"`
 	CurrentIndex           int    `json:"currentIndex,omitempty"`
+	StartLine              int    `json:"startLine,omitempty"`
+	EndLine                int    `json:"endLine,omitempty"`
 
 	Kind     string               `json:"kind"`
 	Value    string               `json:"value,omitempty"`
@@ -70,6 +72,7 @@ func structuralASTNodeFromGo(node goast.Node, fileSet *token.FileSet, id, field 
 		OriginalIndex: index,
 		CurrentIndex:  index,
 	}
+	result.StartLine, result.EndLine = safeNodeLines(fileSet, node)
 	value := reflect.ValueOf(node).Elem()
 	astNodeType := reflect.TypeOf((*goast.Node)(nil)).Elem()
 	for fieldIndex := 0; fieldIndex < value.NumField(); fieldIndex++ {
@@ -103,6 +106,17 @@ func structuralASTNodeFromGo(node goast.Node, fileSet *token.FileSet, id, field 
 		}
 	}
 	return result
+}
+
+func safeNodeLines(fileSet *token.FileSet, node goast.Node) (startLine, endLine int) {
+	defer func() {
+		if recover() != nil {
+			startLine, endLine = 0, 0
+		}
+	}()
+	start := fileSet.Position(node.Pos())
+	end := fileSet.Position(node.End())
+	return start.Line, end.Line
 }
 
 func shallowStructuralNode(node *structuralASTNode) *structuralASTNode {

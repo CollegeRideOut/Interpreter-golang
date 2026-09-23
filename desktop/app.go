@@ -1,8 +1,11 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,15 +14,19 @@ import (
 
 	"interpreter/engine"
 	"interpreter/explorer"
+	headless "interpreter/workspace"
 )
 
 // App struct
 type App struct {
-	ctx         context.Context
-	programPath string
-	source      []byte
-	target      []byte
-	state       *engine.WorkingState
+	ctx              context.Context
+	workspace        *headless.Workspace
+	programPath      string
+	source           []byte
+	target           []byte
+	state            *engine.WorkingState
+	revisionRoot     string
+	comparisonStates map[string]*engine.WorkingState
 }
 
 type ProgramSnapshot struct {
@@ -58,6 +65,51 @@ type ProgramCandidate struct {
 	engine.ReconciliationCandidate
 }
 
+type RevisionOption struct {
+	Kind      string `json:"kind"`
+	Ref       string `json:"ref"`
+	Hash      string `json:"hash"`
+	ShortHash string `json:"shortHash"`
+	Date      string `json:"date"`
+	Author    string `json:"author"`
+	Subject   string `json:"subject"`
+}
+
+type RevisionContext struct {
+	Branch        string           `json:"branch"`
+	CurrentCommit string           `json:"currentCommit"`
+	Options       []RevisionOption `json:"options"`
+}
+
+type EditSummary struct {
+	Index          int                   `json:"index"`
+	Kind           string                `json:"kind"`
+	NodeID         string                `json:"nodeId"`
+	NodeGlobalID   string                `json:"nodeGlobalId,omitempty"`
+	SourceGlobalID string                `json:"sourceGlobalId,omitempty"`
+	ParentGlobalID string                `json:"parentGlobalId,omitempty"`
+	NodeKind       string                `json:"nodeKind"`
+	ParentID       string                `json:"parentId,omitempty"`
+	ParentKind     string                `json:"parentKind,omitempty"`
+	AncestorIDs    []string              `json:"ancestorIds,omitempty"`
+	Ancestors      []engine.EditAncestor `json:"ancestors,omitempty"`
+	Field          string                `json:"field,omitempty"`
+	Position       int                   `json:"position"`
+	Value          string                `json:"value,omitempty"`
+	StartLine      int                   `json:"startLine,omitempty"`
+	EndLine        int                   `json:"endLine,omitempty"`
+	Status         engine.EditStatus     `json:"status"`
+}
+
+type FileEditState struct {
+	Edits             []EditSummary `json:"edits"`
+	LiftedEdits       []EditSummary `json:"liftedEdits,omitempty"`
+	WorkingCode       string        `json:"workingCode"`
+	RenderDiagnostics []string      `json:"renderDiagnostics,omitempty"`
+	Diagnostics       []string      `json:"diagnostics,omitempty"`
+	Valid             bool          `json:"valid"`
+}
+
 func liftOptions(hiddenKinds []string) engine.LiftOptions {
 	hidden := make(map[string]bool, len(hiddenKinds))
 	for _, kind := range hiddenKinds {
@@ -72,7 +124,7 @@ func defaultHiddenKinds() []string {
 
 // NewApp creates a new App application struct
 func NewApp() *App {
-	return &App{}
+	return &App{workspace: headless.New(), comparisonStates: make(map[string]*engine.WorkingState)}
 }
 
 // startup is called at application startup
@@ -88,6 +140,10 @@ func (a *App) OpenProgram(directory string) (ProgramSnapshot, error) {
 	if err != nil {
 		return ProgramSnapshot{}, err
 	}
+	a.clearRevisionRoot()
+	if _, err := a.headlessWorkspace().OpenProgram(absolute); err != nil {
+		return ProgramSnapshot{}, err
+	}
 	packages, err := explorer.DiscoverPackages(absolute)
 	if err != nil {
 		return ProgramSnapshot{}, err
@@ -96,6 +152,7 @@ func (a *App) OpenProgram(directory string) (ProgramSnapshot, error) {
 	a.source = nil
 	a.target = nil
 	a.state = nil
+	a.comparisonStates = make(map[string]*engine.WorkingState)
 	imports := make(map[string]bool)
 	for _, pkg := range packages {
 		for _, imported := range pkg.LocalImports {
@@ -108,6 +165,360 @@ func (a *App) OpenProgram(directory string) (ProgramSnapshot, error) {
 	}
 	sort.Strings(localImports)
 	return ProgramSnapshot{Path: absolute, Exploration: true, Packages: packages, LocalImports: localImports}, nil
+}
+
+// SelectRevision reloads the explorer from the working tree or an immutable
+// Git snapshot. It never checks out or changes the user's repository.
+func (a *App) SelectRevision(directory, revision string) (headless.State, error) {
+	absolute, err := filepath.Abs(directory)
+	if err != nil {
+		return headless.State{}, err
+	}
+	a.clearRevisionRoot()
+	if revision == "working-tree" || revision == "" {
+		return a.headlessWorkspace().OpenProgram(absolute)
+	}
+	root, err := os.MkdirTemp("", "contuts-revision-")
+	if err != nil {
+		return headless.State{}, err
+	}
+	if err := materializeGitRevision(absolute, revision, root); err != nil {
+		os.RemoveAll(root)
+		return headless.State{}, err
+	}
+	a.revisionRoot = root
+	a.programPath = absolute
+	a.source = nil
+	a.target = nil
+	a.state = nil
+	a.comparisonStates = make(map[string]*engine.WorkingState)
+	return a.headlessWorkspace().OpenProgramAt(absolute, root)
+}
+
+// GetFileEdits returns structural edits needed to transform currentRevision
+// into compareRevision for one file. It does not apply or persist anything.
+func (a *App) GetFileEdits(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string) ([]EditSummary, error) {
+	absolute, err := filepath.Abs(directory)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := gitOutput(absolute, "rev-parse", "--show-toplevel"); err != nil {
+		return nil, err
+	}
+	state, err := a.comparisonState(absolute, currentRevision, compareRevision, packageDirectory, packageName, filePath)
+	if err != nil {
+		return nil, err
+	}
+	return summarizeComparisonState(state).Edits, nil
+}
+
+func (a *App) GetFileEditState(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string) (FileEditState, error) {
+	absolute, err := filepath.Abs(directory)
+	if err != nil {
+		return FileEditState{}, err
+	}
+	state, err := a.comparisonState(absolute, currentRevision, compareRevision, packageDirectory, packageName, filePath)
+	if err != nil {
+		return FileEditState{}, err
+	}
+	return summarizeComparisonState(state), nil
+}
+
+func comparisonKey(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string) string {
+	return strings.Join([]string{directory, currentRevision, compareRevision, packageDirectory, packageName, filePath}, "\x00")
+}
+
+func (a *App) comparisonState(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string) (*engine.WorkingState, error) {
+	if a.comparisonStates == nil {
+		a.comparisonStates = make(map[string]*engine.WorkingState)
+	}
+	key := comparisonKey(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath)
+	if state := a.comparisonStates[key]; state != nil {
+		return state, nil
+	}
+	current, err := revisionFileBytes(directory, currentRevision, filePath)
+	if err != nil {
+		return nil, err
+	}
+	compare, err := revisionFileBytes(directory, compareRevision, filePath)
+	if err != nil {
+		return nil, err
+	}
+	state, err := engine.NewWorkingStateFromSource(current, compare)
+	if err != nil {
+		return nil, fmt.Errorf("compare %s: %w", filePath, err)
+	}
+	a.comparisonStates[key] = state
+	return state, nil
+}
+
+func summarizeComparisonState(state *engine.WorkingState) FileEditState {
+	snapshot := state.Snapshot()
+	validation := state.ValidateGo()
+	views := engine.ProjectEdits(snapshot.Edits, liftOptions(defaultHiddenKinds()))
+	summarize := func(index int) EditSummary {
+		edit := snapshot.Edits[index]
+		item := EditSummary{Index: edit.Index, Kind: edit.Kind, NodeID: edit.NodeID, NodeGlobalID: edit.NodeGlobalID, SourceGlobalID: edit.SourceGlobalID, ParentGlobalID: edit.ParentGlobalID, NodeKind: edit.NodeKind, ParentID: edit.ParentID, ParentKind: edit.ParentKind, AncestorIDs: append([]string(nil), edit.AncestorIDs...), Ancestors: append([]engine.EditAncestor(nil), edit.Ancestors...), Field: edit.Field, Position: edit.Position, Value: edit.Value, Status: snapshot.Status[index]}
+		if edit.Node != nil {
+			item.StartLine = edit.Node.StartLine
+			item.EndLine = edit.Node.EndLine
+		}
+		if item.EndLine == 0 {
+			item.EndLine = item.StartLine
+		}
+		return item
+	}
+	all := make([]EditSummary, 0, len(snapshot.Edits))
+	for index := range snapshot.Edits {
+		all = append(all, summarize(index))
+	}
+	lifted := make([]EditSummary, 0, len(views))
+	for _, view := range views {
+		lifted = append(lifted, summarize(view.EditIndex))
+	}
+	return FileEditState{Edits: all, LiftedEdits: lifted, WorkingCode: snapshot.RenderedCode, RenderDiagnostics: snapshot.RenderDiagnostics, Diagnostics: validation.Diagnostics, Valid: validation.Valid}
+}
+
+func (a *App) ApplyFileEdit(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string, index int) (FileEditState, error) {
+	absolute, err := filepath.Abs(directory)
+	if err != nil {
+		return FileEditState{}, err
+	}
+	state, err := a.comparisonState(absolute, currentRevision, compareRevision, packageDirectory, packageName, filePath)
+	if err != nil {
+		return FileEditState{}, err
+	}
+	if err := state.ApplyProjected(index, engine.ApplyOptions{Reconcile: true}, liftOptions(defaultHiddenKinds())); err != nil {
+		return FileEditState{}, err
+	}
+	return summarizeComparisonState(state), nil
+}
+
+func (a *App) RemoveFileEdit(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string, index int) (FileEditState, error) {
+	absolute, err := filepath.Abs(directory)
+	if err != nil {
+		return FileEditState{}, err
+	}
+	state, err := a.comparisonState(absolute, currentRevision, compareRevision, packageDirectory, packageName, filePath)
+	if err != nil {
+		return FileEditState{}, err
+	}
+	if err := state.RemoveProjected(index, liftOptions(defaultHiddenKinds())); err != nil {
+		return FileEditState{}, err
+	}
+	return summarizeComparisonState(state), nil
+}
+
+func revisionFileBytes(directory, revision, filePath string) ([]byte, error) {
+	if revision == "working-tree" || revision == "" {
+		return os.ReadFile(filepath.Join(directory, filepath.FromSlash(filePath)))
+	}
+	output, err := exec.Command("git", "-C", directory, "show", revision+":"+filePath).Output()
+	if err != nil {
+		return nil, fmt.Errorf("read %s at %s: %w", filePath, revision, err)
+	}
+	return output, nil
+}
+
+func (a *App) clearRevisionRoot() {
+	if a.revisionRoot != "" {
+		_ = os.RemoveAll(a.revisionRoot)
+		a.revisionRoot = ""
+	}
+}
+
+func materializeGitRevision(directory, revision, destination string) error {
+	archive, err := exec.Command("git", "-C", directory, "archive", revision).Output()
+	if err != nil {
+		return fmt.Errorf("read Git revision %s: %w", revision, err)
+	}
+	reader := tar.NewReader(bytes.NewReader(archive))
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read Git archive: %w", err)
+		}
+		cleanName := filepath.Clean(filepath.FromSlash(header.Name))
+		if cleanName == "." || filepath.IsAbs(cleanName) || cleanName == ".." || strings.HasPrefix(cleanName, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("unsafe path in Git archive: %s", header.Name)
+		}
+		path := filepath.Join(destination, cleanName)
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(path, os.FileMode(header.Mode)); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				return err
+			}
+			file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(header.Mode))
+			if err != nil {
+				return err
+			}
+			_, copyErr := io.Copy(file, reader)
+			closeErr := file.Close()
+			if copyErr != nil {
+				return copyErr
+			}
+			if closeErr != nil {
+				return closeErr
+			}
+		}
+	}
+}
+
+// GetRevisionContext returns branch and commit choices without changing the
+// checked-out worktree or generating a comparison.
+func (a *App) GetRevisionContext(directory string) (RevisionContext, error) {
+	absolute, err := filepath.Abs(directory)
+	if err != nil {
+		return RevisionContext{}, err
+	}
+	gitRoot, err := gitOutput(absolute, "rev-parse", "--show-toplevel")
+	if err != nil || filepath.Clean(gitRoot) != filepath.Clean(absolute) {
+		return RevisionContext{}, fmt.Errorf("program directory is not an independent Git repository")
+	}
+	branch, err := gitOutput(absolute, "symbolic-ref", "--short", "-q", "HEAD")
+	if err != nil {
+		branch = "HEAD"
+	}
+	commit, err := gitOutput(absolute, "rev-parse", "HEAD")
+	if err != nil {
+		return RevisionContext{}, fmt.Errorf("read current Git commit: %w", err)
+	}
+	branchRows, err := gitOutput(absolute, "for-each-ref", "--format=%(refname:short)\t%(objectname)\t%(committerdate:iso8601)\t%(subject)", "refs/heads", "refs/remotes")
+	if err != nil {
+		return RevisionContext{}, fmt.Errorf("read Git branches: %w", err)
+	}
+	logRows, err := gitOutput(absolute, "log", "--all", "--format=%H\t%h\t%cI\t%an\t%s", "--date-order")
+	if err != nil {
+		return RevisionContext{}, fmt.Errorf("read Git commits: %w", err)
+	}
+
+	options := make([]RevisionOption, 0)
+	seen := make(map[string]bool)
+	for _, row := range strings.Split(branchRows, "\n") {
+		parts := strings.SplitN(row, "\t", 4)
+		if len(parts) != 4 || parts[0] == "" || seen[parts[1]] {
+			continue
+		}
+		seen[parts[1]] = true
+		options = append(options, RevisionOption{Kind: "branch", Ref: parts[0], Hash: parts[1], ShortHash: parts[1][:minInt(7, len(parts[1]))], Date: parts[2], Subject: parts[3]})
+	}
+	for _, row := range strings.Split(logRows, "\n") {
+		parts := strings.SplitN(row, "\t", 5)
+		if len(parts) != 5 || parts[0] == "" || seen[parts[0]] {
+			continue
+		}
+		seen[parts[0]] = true
+		options = append(options, RevisionOption{Kind: "commit", Ref: parts[0], Hash: parts[0], ShortHash: parts[1], Date: parts[2], Author: parts[3], Subject: parts[4]})
+	}
+	return RevisionContext{Branch: strings.TrimSpace(branch), CurrentCommit: strings.TrimSpace(commit), Options: options}, nil
+}
+
+func gitOutput(directory string, args ...string) (string, error) {
+	commandArgs := append([]string{"-C", directory}, args...)
+	output, err := exec.Command("git", commandArgs...).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %w\n%s", strings.Join(args, " "), err, output)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func minInt(left, right int) int {
+	if left < right {
+		return left
+	}
+	return right
+}
+
+func (a *App) headlessWorkspace() *headless.Workspace {
+	if a.workspace == nil {
+		a.workspace = headless.New()
+	}
+	return a.workspace
+}
+
+// GetCurrentState returns the complete renderable inquiry state.
+func (a *App) GetCurrentState() (headless.State, error) {
+	return a.headlessWorkspace().CurrentState()
+}
+
+// StartInquiry adds a new independent inquiry row at the bottom.
+func (a *App) StartInquiry(title string) (headless.State, error) {
+	return a.headlessWorkspace().StartInquiry(title)
+}
+
+// OpenInquiryPackage appends a package tile to an inquiry row.
+func (a *App) OpenInquiryPackage(rowID, tileID, packageDirectory, packageName string) (headless.State, error) {
+	return a.headlessWorkspace().OpenPackage(rowID, tileID, packageDirectory, packageName)
+}
+
+// NavigateInquiryPackage enters a package in the current column.
+func (a *App) NavigateInquiryPackage(rowID, tileID, packageDirectory, packageName string) (headless.State, error) {
+	return a.headlessWorkspace().NavigatePackage(rowID, tileID, packageDirectory, packageName)
+}
+
+// BackInquiry restores the previous target in the selected column.
+func (a *App) BackInquiry(rowID, tileID string) (headless.State, error) {
+	return a.headlessWorkspace().Back(rowID, tileID)
+}
+
+// InspectInquiryFile loads a file into a tile's source pane without changing
+// the tile's package target.
+func (a *App) InspectInquiryFile(rowID, tileID, packageDirectory, packageName, filePath string) (headless.State, error) {
+	return a.headlessWorkspace().InspectFile(rowID, tileID, packageDirectory, packageName, filePath)
+}
+
+// InspectInquiryDeclaration loads a declaration's containing file into the
+// current tile's source pane without changing lineage.
+func (a *App) InspectInquiryDeclaration(rowID, tileID, packageDirectory, packageName, filePath, name string, line int) (headless.State, error) {
+	return a.headlessWorkspace().InspectDeclaration(rowID, tileID, packageDirectory, packageName, filePath, name, line)
+}
+
+// OpenInquiryFile appends a file tile to an inquiry row.
+func (a *App) OpenInquiryFile(rowID, tileID, packageDirectory, packageName, filePath string) (headless.State, error) {
+	return a.headlessWorkspace().OpenFile(rowID, tileID, packageDirectory, packageName, filePath)
+}
+
+// NavigateInquiryFile enters a file in the current column.
+func (a *App) NavigateInquiryFile(rowID, tileID, packageDirectory, packageName, filePath string) (headless.State, error) {
+	return a.headlessWorkspace().NavigateFile(rowID, tileID, packageDirectory, packageName, filePath)
+}
+
+// OpenInquiryDeclaration appends a declaration tile to an inquiry row.
+func (a *App) OpenInquiryDeclaration(rowID, tileID, packageDirectory, packageName, filePath, name string, line int) (headless.State, error) {
+	return a.headlessWorkspace().OpenDeclaration(rowID, tileID, packageDirectory, packageName, filePath, name, line)
+}
+
+// NavigateInquiryDeclaration enters a declaration in the current column.
+func (a *App) NavigateInquiryDeclaration(rowID, tileID, packageDirectory, packageName, filePath, name string, line int) (headless.State, error) {
+	return a.headlessWorkspace().NavigateDeclaration(rowID, tileID, packageDirectory, packageName, filePath, name, line)
+}
+
+// SetInquiryPane controls one of the two independently collapsible tile views.
+func (a *App) SetInquiryPane(rowID, tileID, pane string, collapsed bool) (headless.State, error) {
+	return a.headlessWorkspace().SetPane(rowID, tileID, pane, collapsed)
+}
+
+// SetInquiryTileCollapsed controls the contents of one inquiry tile.
+func (a *App) SetInquiryTileCollapsed(rowID, tileID string, collapsed bool) (headless.State, error) {
+	return a.headlessWorkspace().SetTileCollapsed(rowID, tileID, collapsed)
+}
+
+// CloseInquiryColumn removes the selected column and its descendants from a
+// row, returning focus to the preceding tile.
+func (a *App) CloseInquiryColumn(rowID, tileID string) (headless.State, error) {
+	return a.headlessWorkspace().CloseColumn(rowID, tileID)
+}
+
+// CloseInquiryTile removes one tile while preserving the other columns.
+func (a *App) CloseInquiryTile(rowID, tileID string) (headless.State, error) {
+	return a.headlessWorkspace().CloseTile(rowID, tileID)
 }
 
 // OpenPackage enters the file view for one discovered package.

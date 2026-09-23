@@ -159,10 +159,63 @@ func renderNode(node *structuralASTNode, indent int, diagnostics *[]string) stri
 		if specs == "" {
 			return node.Value
 		}
+		if node.Value == "import" && len(childrenForField(node, "Specs")) == 1 {
+			return node.Value + " " + specs
+		}
 		if node.Value == "import" || node.Value == "const" || node.Value == "var" || node.Value == "type" {
 			return node.Value + " (\n" + indentLines(specs, indent+1) + "\n" + tabs(indent) + ")"
 		}
 		return node.Value + " " + specs
+	case "*ast.TypeSpec":
+		name := renderField(node, "Name", indent, diagnostics)
+		alias := ""
+		if node.Value == "=" {
+			alias = " ="
+		}
+		typeName := renderField(node, "Type", indent, diagnostics)
+		if name == "" || typeName == "" {
+			return placeholder(node, diagnostics)
+		}
+		return name + alias + " " + typeName
+	case "*ast.CompositeLit":
+		typeName := renderField(node, "Type", indent, diagnostics)
+		elements := renderFieldList(node, "Elts", indent+1, diagnostics)
+		if typeName == "" {
+			typeName = "STRUCTURALERROR.CompositeType"
+		}
+		if elements == "" {
+			return typeName + "{}"
+		}
+		return typeName + "{" + elements + "}"
+	case "*ast.KeyValueExpr":
+		key := renderField(node, "Key", indent, diagnostics)
+		value := renderField(node, "Value", indent, diagnostics)
+		return key + ": " + value
+	case "*ast.ArrayType":
+		length := renderField(node, "Len", indent, diagnostics)
+		element := renderField(node, "Elt", indent, diagnostics)
+		if length == "" {
+			return "[]" + element
+		}
+		return "[" + length + "]" + element
+	case "*ast.MapType":
+		key := renderField(node, "Key", indent, diagnostics)
+		value := renderField(node, "Value", indent, diagnostics)
+		return "map[" + key + "]" + value
+	case "*ast.StructType":
+		fields := renderFieldBlock(node, "Fields", indent, diagnostics)
+		if fields == "" {
+			return "struct{}"
+		}
+		return "struct {\n" + fields + "\n" + tabs(indent) + "}"
+	case "*ast.InterfaceType":
+		methods := renderFieldBlock(node, "Methods", indent, diagnostics)
+		if methods == "" {
+			return "interface{}"
+		}
+		return "interface {\n" + methods + "\n" + tabs(indent) + "}"
+	case "*ast.Ellipsis":
+		return "..." + renderField(node, "Elt", indent, diagnostics)
 	case "*ast.ImportSpec":
 		return renderField(node, "Path", indent, diagnostics)
 	case "*ast.FieldList":
@@ -246,6 +299,20 @@ func renderFieldLines(node *structuralASTNode, field string, indent int, diagnos
 	for _, child := range childrenForField(node, field) {
 		if value := renderNode(child, indent, diagnostics); value != "" {
 			values = append(values, tabs(indent)+value)
+		}
+	}
+	return strings.Join(values, "\n")
+}
+
+func renderFieldBlock(node *structuralASTNode, field string, indent int, diagnostics *[]string) string {
+	children := childForField(node, field)
+	if children == nil {
+		return ""
+	}
+	values := make([]string, 0)
+	for _, child := range childrenForField(children, "List") {
+		if value := renderNode(child, indent+1, diagnostics); value != "" {
+			values = append(values, tabs(indent+1)+value)
 		}
 	}
 	return strings.Join(values, "\n")

@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"strings"
 	"testing"
 
 	"interpreter/engine"
@@ -41,6 +42,59 @@ func TestPublicEngineAPI(t *testing.T) {
 	}
 }
 
+func TestApplyProjectedKeepsReplacementSlotsValid(t *testing.T) {
+	state, err := engine.NewWorkingStateFromSource(
+		[]byte("package main\n\nfunc main() {\n\tx := 5\n\t_ = x\n}\n"),
+		[]byte("package main\n\nimport \"fmt\"\n\nfunc main() {\n\tmonthlyIncome := 81000\n\tfmt.Println(monthlyIncome)\n}\n"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deleteIndex := -1
+	for index, edit := range state.Snapshot().Edits {
+		if edit.Kind == "DELETE" && edit.NodeKind == "*ast.Ident" && edit.Value == "x" {
+			deleteIndex = index
+			break
+		}
+	}
+	if deleteIndex < 0 {
+		t.Fatal("expected the old x identifier replacement edit")
+	}
+	if err := state.ApplyProjected(deleteIndex, engine.ApplyOptions{Reconcile: true}, engine.LiftOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if report := state.ValidateGo(); !report.Valid {
+		t.Fatalf("replacement left invalid Go: %v", report.Diagnostics)
+	}
+	if err := state.RemoveProjected(deleteIndex, engine.LiftOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if report := state.ValidateGo(); !report.Valid {
+		t.Fatalf("removing replacement left invalid Go: valid=%v code=%q", report.Valid, state.Snapshot().RenderedCode)
+	}
+}
+
+func TestApplyProjectedReachesMonthlyBudgetTarget(t *testing.T) {
+	source := []byte("package main\n\nfunc main() {\n\n\tx := 5\n\t_ = x\n\n}\n")
+	target := []byte("package main\n\nimport \"fmt\"\n\nfunc main() {\n\tmonthlyIncome := 81000\n\tphone := 2000\n\tgas := 5000\n\tgym := 2000\n\tentertainment := 2000\n\n\ttotalExpenses := phone + gas + gym + entertainment\n\tremaining := monthlyIncome - totalExpenses\n\n\tfmt.Println(\"remaining:\", remaining)\n}\n")
+	state, err := engine.NewWorkingStateFromSource(source, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range state.Snapshot().Edits {
+		if err := state.ApplyProjected(index, engine.ApplyOptions{Reconcile: true}, engine.LiftOptions{}); err != nil {
+			t.Fatalf("apply edit %d: %v", index, err)
+		}
+	}
+	if report := state.ValidateGo(); !report.Valid {
+		t.Fatalf("target application left invalid Go: %v\n%s", report.Diagnostics, state.Snapshot().RenderedCode)
+	}
+	if got := state.Snapshot().RenderedCode; strings.Join(strings.Fields(got), " ") != strings.Join(strings.Fields(string(target)), " ") {
+		t.Fatalf("applied source differs from target:\n--- got ---\n%s\n--- want ---\n%s", got, target)
+	}
+}
+
 func TestRenderBestEffortPreservesIntermediateNodes(t *testing.T) {
 	root, err := engine.Parse([]byte("package main\n\nfunc main() {}\n"))
 	if err != nil {
@@ -68,6 +122,20 @@ func TestRenderBestEffortRendersFunctionLiteral(t *testing.T) {
 	for _, diagnostic := range result.Diagnostics {
 		if diagnostic == "unsupported or incomplete *ast.FuncLit" {
 			t.Fatalf("complete function literal produced an unsupported diagnostic")
+		}
+	}
+}
+
+func TestRenderBestEffortRendersTypesAndCompositeLiterals(t *testing.T) {
+	source := []byte("package main\n\ntype Config struct { Name string }\n\nfunc main() { _ = Config{Name: \"demo\"} }\n")
+	root, err := engine.Parse(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := engine.RenderBestEffort(root)
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic == "unsupported or incomplete *ast.TypeSpec" || diagnostic == "unsupported or incomplete *ast.CompositeLit" {
+			t.Fatalf("complete AST node produced an unsupported diagnostic: %s\n%s", diagnostic, result.Code)
 		}
 	}
 }

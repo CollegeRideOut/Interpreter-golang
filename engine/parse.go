@@ -27,6 +27,11 @@ func goNodeValue(node goast.Node) string {
 		return node.Tok.String()
 	case *goast.GenDecl:
 		return node.Tok.String()
+	case *goast.TypeSpec:
+		if node.Assign.IsValid() {
+			return "="
+		}
+		return ""
 	case *goast.File:
 		return node.Name.Name
 	default:

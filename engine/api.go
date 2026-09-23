@@ -11,6 +11,16 @@ type Node = structuralASTNode
 // Edit describes one structural change from a source tree to a target tree.
 type Edit = structuralEdit
 
+type EditAncestor struct {
+	NodeID    string `json:"nodeId"`
+	GlobalID  string `json:"globalId,omitempty"`
+	NodeKind  string `json:"nodeKind"`
+	Field     string `json:"field,omitempty"`
+	Value     string `json:"value,omitempty"`
+	StartLine int    `json:"startLine,omitempty"`
+	EndLine   int    `json:"endLine,omitempty"`
+}
+
 // ApplyOptions controls how an edit is applied to the working tree.
 type ApplyOptions struct {
 	Reconcile bool

@@ -2,14 +2,14 @@
   "$schema": "https://wails.io/schemas/config.v2.json",
   "name": "contuts-desktop",
   "outputfilename": "desktop",
-  "assetdir": "frontend/dist/frontend/browser",
+  "assetdir": "frontend-react/dist/frontend/browser",
   "build:tags": "webkit2_41",
-  "wailsjsdir": "./frontend",
-  "frontend:dir": "frontend",
+  "wailsjsdir": "./frontend-react",
+  "frontend:dir": "frontend-react",
   "frontend:install": "npm install",
   "frontend:build": "npm run build",
   "frontend:dev:build": "npm run build",
-  "frontend:dev:watcher": "npm start -- --host 127.0.0.1",
+  "frontend:dev:watcher": "npm run dev -- --host 127.0.0.1",
   "author": {
     "name": "Manuel Arturo Lopez Perez",
     "email": "mp.arturolopez@gmail.com"

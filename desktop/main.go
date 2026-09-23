@@ -8,7 +8,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 )
 
-//go:embed all:frontend/dist/frontend/browser
+//go:embed all:frontend-react/dist/frontend/browser
 var assets embed.FS
 
 func main() {

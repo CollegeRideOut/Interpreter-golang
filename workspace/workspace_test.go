@@ -198,6 +198,22 @@ func TestDeclarationOverviewIncludesReferences(t *testing.T) {
 	}
 }
 
+func TestOpenDeclarationLeftInsertsBeforeFirstColumn(t *testing.T) {
+	workspace := New()
+	state, err := workspace.OpenProgram("../TestProgramCalorieApp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := state.Rows[0]
+	state, err = workspace.OpenDeclarationLeft(row.ID, row.Tiles[0].ID, "controllers", "controllers", "controllers/calories.go", "CaloriesController", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Rows[0].Tiles) != 2 || state.Rows[0].Tiles[0].Target.Kind != "declaration" || state.Rows[0].Tiles[0].Column != 0 || state.Rows[0].Tiles[1].Column != 1 {
+		t.Fatalf("left declaration state = %+v", state.Rows[0].Tiles)
+	}
+}
+
 func TestFileOverviewIncludesAllImportsAndLocalImportMetadata(t *testing.T) {
 	workspace := New()
 	state, err := workspace.OpenProgram("../TestProgramCalorieApp")

@@ -56,6 +56,8 @@ export function OpenImportedFile(arg1:string,arg2:string,arg3:string):Promise<ma
 
 export function OpenInquiryDeclaration(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:number):Promise<workspace.State>;
 
+export function OpenInquiryDeclarationLeft(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:number):Promise<workspace.State>;
+
 export function OpenInquiryFile(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<workspace.State>;
 
 export function OpenInquiryPackage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<workspace.State>;

@@ -373,6 +373,46 @@ func (w *Workspace) OpenDeclaration(rowID, tileID, packageDirectory, packageName
 	return State{}, fmt.Errorf("file %s was not found in package %s", filePath, packageName)
 }
 
+// OpenDeclarationLeft inserts a declaration tile immediately to the left of
+// the source tile, preserving the existing columns.
+func (w *Workspace) OpenDeclarationLeft(rowID, tileID, packageDirectory, packageName, filePath, name string, line int) (State, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	pkg, err := w.packageLocked(packageDirectory, packageName)
+	if err != nil {
+		return State{}, err
+	}
+	for _, file := range pkg.Files {
+		if file.Path != filePath {
+			continue
+		}
+		declaration := findDeclaration(file.Declarations, name, line)
+		if declaration == nil {
+			return State{}, fmt.Errorf("declaration %s was not found in %s", name, filePath)
+		}
+		source, readErr := os.ReadFile(filepath.Join(w.programRoot, filepath.FromSlash(file.Path)))
+		if readErr != nil {
+			return State{}, readErr
+		}
+		lines := strings.Split(string(source), "\n")
+		start, end := declaration.Line-1, declaration.EndLine
+		if start < 0 {
+			start = 0
+		}
+		if end > len(lines) {
+			end = len(lines)
+		}
+		content := ""
+		if start <= end {
+			content = strings.Join(lines[start:end], "\n")
+		}
+		overview := Overview{Kind: "declaration", Title: name, Subtitle: declaration.Kind, Declarations: []explorer.Declaration{*declaration}, References: referencesForDeclaration(w.state.Program, packageDirectory, filePath, *declaration)}
+		text := textViewForDeclaration(file, declaration, content)
+		return w.insertTileLeftLocked(rowID, tileID, "declaration", "opens declaration", Target{Kind: "declaration", PackagePath: packageDirectory, PackageName: packageName, FilePath: filePath, DeclarationName: name, Line: declaration.Line, EndLine: declaration.EndLine}, overview, text)
+	}
+	return State{}, fmt.Errorf("file %s was not found in package %s", filePath, packageName)
+}
+
 // NavigateDeclaration replaces the current tile with a declaration in the
 // same column.
 func (w *Workspace) NavigateDeclaration(rowID, tileID, packageDirectory, packageName, filePath, name string, line int) (State, error) {
@@ -577,6 +617,38 @@ func (w *Workspace) appendTileLocked(rowID, fromTileID, kind, relation string, t
 	}
 	row.Tiles = append(row.Tiles, tile)
 	row.Edges = append(row.Edges, Edge{ID: edgeID, FromTileID: from.ID, ToTileID: tileID, Kind: kind, Label: relation})
+	w.state.Active = Selection{RowID: rowID, TileID: tileID}
+	w.bump()
+	return cloneState(w.state), nil
+}
+
+func (w *Workspace) insertTileLeftLocked(rowID, fromTileID, kind, relation string, target Target, overview Overview, text TextView) (State, error) {
+	row, from, err := w.tileLocked(rowID, fromTileID)
+	if err != nil {
+		return State{}, err
+	}
+	fromID := from.ID
+	column := from.Column
+	tileID := w.id("tile")
+	edgeID := w.id("edge")
+	tile := Tile{ID: tileID, Column: column, Target: target, OpenedBy: &EdgeRef{EdgeID: edgeID, Relationship: relation, FromTileID: fromID}, Overview: overview, Text: text}
+	for _, existing := range row.Tiles {
+		if existing.Target == target {
+			tile.PreviouslyOpened = true
+			tile.ExistingTileID = existing.ID
+			break
+		}
+	}
+	shifted := make([]Tile, len(row.Tiles)+1)
+	shifted[column] = tile
+	for _, existing := range row.Tiles {
+		if existing.Column >= column {
+			existing.Column++
+		}
+		shifted[existing.Column] = existing
+	}
+	row.Tiles = shifted
+	row.Edges = append(row.Edges, Edge{ID: edgeID, FromTileID: fromID, ToTileID: tileID, Kind: kind, Label: relation})
 	w.state.Active = Selection{RowID: rowID, TileID: tileID}
 	w.bump()
 	return cloneState(w.state), nil

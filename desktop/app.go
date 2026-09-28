@@ -495,6 +495,11 @@ func (a *App) OpenInquiryDeclaration(rowID, tileID, packageDirectory, packageNam
 	return a.headlessWorkspace().OpenDeclaration(rowID, tileID, packageDirectory, packageName, filePath, name, line)
 }
 
+// OpenInquiryDeclarationLeft inserts a declaration tile to the left of the source tile.
+func (a *App) OpenInquiryDeclarationLeft(rowID, tileID, packageDirectory, packageName, filePath, name string, line int) (headless.State, error) {
+	return a.headlessWorkspace().OpenDeclarationLeft(rowID, tileID, packageDirectory, packageName, filePath, name, line)
+}
+
 // NavigateInquiryDeclaration enters a declaration in the current column.
 func (a *App) NavigateInquiryDeclaration(rowID, tileID, packageDirectory, packageName, filePath, name string, line int) (headless.State, error) {
 	return a.headlessWorkspace().NavigateDeclaration(rowID, tileID, packageDirectory, packageName, filePath, name, line)

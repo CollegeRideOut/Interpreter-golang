@@ -106,6 +106,10 @@ export function OpenInquiryDeclaration(arg1, arg2, arg3, arg4, arg5, arg6, arg7)
   return window['go']['main']['App']['OpenInquiryDeclaration'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }
 
+export function OpenInquiryDeclarationLeft(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
+  return window['go']['main']['App']['OpenInquiryDeclarationLeft'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+}
+
 export function OpenInquiryFile(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['OpenInquiryFile'](arg1, arg2, arg3, arg4, arg5);
 }

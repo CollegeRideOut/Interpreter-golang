@@ -38,6 +38,7 @@ function fakeEngine(initialState?: HeadlessState, fileEdits: EditSummary[] = [{ 
     openDeclaration: async (_rowID, _tileID, _packageDirectory, _packageName, _filePath, name) => {
       return result();
     },
+    openDeclarationLeft: result,
     navigateDeclaration: result,
     setPane: result,
     setTileCollapsed: result,
@@ -78,7 +79,8 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByText(/Highlighting Run/)).toBeInTheDocument());
     fireEvent.click(await screen.findByRole('button', { name: 'Generate edits' }));
     expect((await screen.findAllByText('Compared edits (1)')).length).toBeGreaterThan(0);
-    expect(screen.getByRole('button', { name: 'Open function Run inquiry' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open right' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open left' })).toBeInTheDocument();
     expect(document.querySelector('mark')?.textContent).toBe('Run');
   });
 

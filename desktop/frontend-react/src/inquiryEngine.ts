@@ -195,6 +195,7 @@ export interface InquiryEngine {
   openFile(rowID: string, tileID: string, packageDirectory: string, packageName: string, filePath: string): Promise<HeadlessState>;
   navigateFile(rowID: string, tileID: string, packageDirectory: string, packageName: string, filePath: string): Promise<HeadlessState>;
   openDeclaration(rowID: string, tileID: string, packageDirectory: string, packageName: string, filePath: string, name: string, line: number): Promise<HeadlessState>;
+  openDeclarationLeft(rowID: string, tileID: string, packageDirectory: string, packageName: string, filePath: string, name: string, line: number): Promise<HeadlessState>;
   navigateDeclaration(rowID: string, tileID: string, packageDirectory: string, packageName: string, filePath: string, name: string, line: number): Promise<HeadlessState>;
   setPane(rowID: string, tileID: string, pane: string, collapsed: boolean): Promise<HeadlessState>;
   setTileCollapsed(rowID: string, tileID: string, collapsed: boolean): Promise<HeadlessState>;
@@ -220,6 +221,7 @@ type WailsEngine = {
   OpenInquiryFile: (rowID: string, tileID: string, packageDirectory: string, packageName: string, filePath: string) => Promise<HeadlessState>;
   NavigateInquiryFile: (rowID: string, tileID: string, packageDirectory: string, packageName: string, filePath: string) => Promise<HeadlessState>;
   OpenInquiryDeclaration: (rowID: string, tileID: string, packageDirectory: string, packageName: string, filePath: string, name: string, line: number) => Promise<HeadlessState>;
+  OpenInquiryDeclarationLeft: (rowID: string, tileID: string, packageDirectory: string, packageName: string, filePath: string, name: string, line: number) => Promise<HeadlessState>;
   NavigateInquiryDeclaration: (rowID: string, tileID: string, packageDirectory: string, packageName: string, filePath: string, name: string, line: number) => Promise<HeadlessState>;
   SetInquiryPane: (rowID: string, tileID: string, pane: string, collapsed: boolean) => Promise<HeadlessState>;
   SetInquiryTileCollapsed: (rowID: string, tileID: string, collapsed: boolean) => Promise<HeadlessState>;
@@ -266,6 +268,7 @@ export function createWailsEngine(): InquiryEngine {
     openFile: (rowID, tileID, packageDirectory, packageName, filePath) => app().OpenInquiryFile(rowID, tileID, packageDirectory, packageName, filePath),
     navigateFile: (rowID, tileID, packageDirectory, packageName, filePath) => app().NavigateInquiryFile(rowID, tileID, packageDirectory, packageName, filePath),
     openDeclaration: (rowID, tileID, packageDirectory, packageName, filePath, name, line) => app().OpenInquiryDeclaration(rowID, tileID, packageDirectory, packageName, filePath, name, line),
+    openDeclarationLeft: (rowID, tileID, packageDirectory, packageName, filePath, name, line) => app().OpenInquiryDeclarationLeft(rowID, tileID, packageDirectory, packageName, filePath, name, line),
     navigateDeclaration: (rowID, tileID, packageDirectory, packageName, filePath, name, line) => app().NavigateInquiryDeclaration(rowID, tileID, packageDirectory, packageName, filePath, name, line),
     setPane: (rowID, tileID, pane, collapsed) => app().SetInquiryPane(rowID, tileID, pane, collapsed),
     setTileCollapsed: (rowID, tileID, collapsed) => app().SetInquiryTileCollapsed(rowID, tileID, collapsed),

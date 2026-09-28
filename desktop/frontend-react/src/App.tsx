@@ -548,7 +548,22 @@ function declarationContent(tile: Tile, editState?: FileEditState): string | und
   if (!editState?.workingCode) return tile.text.content;
   const declaration = tile.overview.declarations?.[0];
   if (!declaration) return tile.text.content;
-  return editState.workingCode.split('\n').slice(Math.max(0, declaration.line - 1), declaration.endLine).join('\n');
+  const lines = editState.workingCode.split('\n');
+  const start = Math.max(0, declaration.line - 1);
+  let depth = 0;
+  let opened = false;
+  for (let index = start; index < lines.length; index += 1) {
+    for (const character of lines[index]) {
+      if (character === '{') {
+        depth += 1;
+        opened = true;
+      } else if (character === '}') {
+        depth -= 1;
+      }
+    }
+    if (opened && depth <= 0) return lines.slice(start, index + 1).join('\n');
+  }
+  return lines.slice(start, declaration.endLine).join('\n');
 }
 
 function AstStatus({ editState }: { editState?: FileEditState }) {
@@ -641,13 +656,14 @@ function ComparisonTreeSection({ tile, edits, excludedDeclarations, completeFile
   const scopedEdits = declaration ? edits.filter((edit) => editBelongsToDeclaration(edit, declaration)) : edits;
   const tree = buildComparisonTree(scopedEdits, declaration, excludedDeclarations);
   const declarations = tile.target.kind === 'file' ? (tile.overview.declarations ?? []).filter((declaration) => editsForDeclaration(edits, declaration).length > 0) : [];
-  return <section className="overview-section edit-section comparison-results"><div className="comparison-tree-heading"><div><h3>Compared edits ({scopedEdits.length})</h3><p>{declaration ? `Edits inside ${declaration.kind} ${declaration.name}.` : 'Complete canonical edit tree. Structural replacements apply together.'}</p></div><div className="comparison-heading-actions"><span className="comparison-scope">{declaration ? 'Declaration' : 'Complete file'}</span>{declarations.map((declaration) => <button type="button" className="open-inquiry-button" key={`${declaration.symbolId ?? declaration.name}:${declaration.line}`} onClick={() => onOpenDeclaration(declaration)}>Open {declaration.kind} {declaration.name} inquiry</button>)}</div></div>{tree.length === 0 ? <p className="empty-note">No edits in this scope.</p> : <div className="comparison-tree">{tree.map((node) => <ComparisonTreeNodeView key={node.id} node={node} depth={0} packageDirectory={tile.target.packagePath ?? ''} packageName={tile.target.packageName ?? ''} file={tile.target.filePath ?? ''} onApplyEdit={onApplyEdit} />)}</div>}</section>;
+  return <section className="overview-section edit-section comparison-results"><div className="comparison-tree-heading"><div><h3>Compared edits ({scopedEdits.length})</h3><p>{declaration ? `Edits inside ${declaration.kind} ${declaration.name}.` : 'Complete canonical edit tree. Structural replacements apply together.'}</p></div><span className="comparison-scope">{declaration ? 'Declaration' : 'Complete file'}</span></div>{tree.length === 0 ? <p className="empty-note">No edits in this scope.</p> : <div className="comparison-tree">{tree.map((node) => <ComparisonTreeNodeView key={node.id} node={node} depth={0} packageDirectory={tile.target.packagePath ?? ''} packageName={tile.target.packageName ?? ''} file={tile.target.filePath ?? ''} openDeclarations={declarations} onOpenDeclaration={onOpenDeclaration} onApplyEdit={onApplyEdit} />)}</div>}</section>;
 }
 
-function ComparisonTreeNodeView({ node, depth, packageDirectory, packageName, file, onApplyEdit }: { node: ComparisonTreeNode; depth: number; packageDirectory: string; packageName: string; file: string; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary) => void }) {
+function ComparisonTreeNodeView({ node, depth, packageDirectory, packageName, file, openDeclarations = [], onOpenDeclaration, onApplyEdit }: { node: ComparisonTreeNode; depth: number; packageDirectory: string; packageName: string; file: string; openDeclarations?: Declaration[]; onOpenDeclaration?: (declaration: Declaration) => void; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary) => void }) {
   const [expanded, setExpanded] = useState(true);
   const edit = node.edit;
-  return <div className="comparison-tree-node"><div className={`comparison-tree-item ${edit ? 'comparison-tree-edit' : 'comparison-tree-context'}`} style={{ marginLeft: `${depth * 1.1}rem` }}><button type="button" className="tree-toggle" onClick={() => setExpanded((value) => !value)} disabled={node.children.length === 0} aria-label={node.children.length === 0 ? 'Leaf node' : expanded ? 'Collapse node' : 'Expand node'}>{node.children.length === 0 ? '·' : expanded ? '−' : '+'}</button><span className="tree-node-label">{edit && <span className="tree-edit-kind">{edit.kind}</span>}<strong>{node.nodeKind.replace('*ast.', '')}</strong>{node.field && <span className="tree-field">{node.field}</span>}{node.startLine !== undefined && <span className="tree-location">line {node.startLine}{node.endLine !== undefined && node.endLine !== node.startLine ? `-${node.endLine}` : ''}</span>}{node.value && <code>{node.value}</code>}</span>{edit && <button type="button" className="edit-action" onClick={() => onApplyEdit(packageDirectory, packageName, file, edit)} disabled={edit.status === 'prepared'}>{edit.status === 'applied' || edit.status === 'prepared' ? 'Remove' : edit.kind === 'DELETE' ? 'Apply replacement' : 'Apply'}</button>}</div>{expanded && node.children.map((child) => <ComparisonTreeNodeView key={child.id} node={child} depth={depth + 1} packageDirectory={packageDirectory} packageName={packageName} file={file} onApplyEdit={onApplyEdit} />)}</div>;
+  const declaration = openDeclarations.find((candidate) => declarationNodeKind(node.nodeKind, candidate));
+  return <div className="comparison-tree-node"><div className={`comparison-tree-item ${edit ? 'comparison-tree-edit' : 'comparison-tree-context'}`} style={{ marginLeft: `${depth * 1.1}rem` }}><button type="button" className="tree-toggle" onClick={() => setExpanded((value) => !value)} disabled={node.children.length === 0} aria-label={node.children.length === 0 ? 'Leaf node' : expanded ? 'Collapse node' : 'Expand node'}>{node.children.length === 0 ? '·' : expanded ? '−' : '+'}</button><span className="tree-node-label">{edit && <span className="tree-edit-kind">{edit.kind}</span>}<strong>{node.nodeKind.replace('*ast.', '')}</strong>{node.field && <span className="tree-field">{node.field}</span>}{node.startLine !== undefined && <span className="tree-location">line {node.startLine}{node.endLine !== undefined && node.endLine !== node.startLine ? `-${node.endLine}` : ''}</span>}{node.value && <code>{node.value}</code>}</span>{declaration && onOpenDeclaration && <button type="button" className="open-inquiry-button tree-open-inquiry" onClick={() => onOpenDeclaration(declaration)}>Open {declaration.kind} {declaration.name} inquiry</button>}{edit && <button type="button" className="edit-action" onClick={() => onApplyEdit(packageDirectory, packageName, file, edit)} disabled={edit.status === 'prepared'}>{edit.status === 'applied' || edit.status === 'prepared' ? 'Remove' : edit.kind === 'DELETE' ? 'Apply replacement' : 'Apply'}</button>}</div>{expanded && node.children.map((child) => <ComparisonTreeNodeView key={child.id} node={child} depth={depth + 1} packageDirectory={packageDirectory} packageName={packageName} file={file} openDeclarations={openDeclarations} onOpenDeclaration={onOpenDeclaration} onApplyEdit={onApplyEdit} />)}</div>;
 }
 
 function ChangedFilesSection({ tile, row, editsForPath, onFile, onFileLeft, onFileColumn }: { tile: Tile; row: InquiryRow; editsForPath: (packageDirectory: string, packageName: string, filePath: string) => EditSummary[]; onFile: (row: InquiryRow, tile: Tile, file: File) => void; onFileLeft: (row: InquiryRow, tile: Tile, file: File) => void; onFileColumn: (row: InquiryRow, tile: Tile, file: File) => void }) {
@@ -662,6 +678,7 @@ function editsForDeclaration(edits: EditSummary[], declaration?: Declaration): E
 }
 
 function editBelongsToDeclaration(edit: EditSummary, declaration: Declaration): boolean {
+  if (edit.ancestors?.some((ancestor) => declarationNodeKind(ancestor.nodeKind, declaration))) return true;
   if (edit.startLine === undefined || edit.endLine === undefined || edit.startLine < declaration.line || edit.endLine > declaration.endLine) return false;
   if (edit.startLine === declaration.line && edit.endLine === declaration.line && !edit.nodeKind.replace('*ast.', '').toLowerCase().includes(declaration.kind.toLowerCase())) return false;
   return true;

@@ -51,6 +51,7 @@ h1, h2, p { margin: 0; }.workspace-heading h1 { overflow: hidden; color: #f0eff7
 .comparison-heading-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .open-inquiry-button { padding: 5px 8px; border: 1px solid #57506e; border-radius: 5px; background: transparent; color: #d1a0ff; font-size: 10px; font-weight: 600; }
 .open-inquiry-button:hover { border-color: #b36aff; color: #f0eff7; }
+.tree-open-inquiry { margin-left: auto; }
 .comparison-tree { display: grid; gap: 4px; margin-top: 8px; }
 .structural-edit-group + .structural-edit-group { margin-top: 14px; }
 .structural-edit-label { display: flex; align-items: center; gap: 5px; margin-bottom: 5px; color: #cfd3e1; font-size: 11px; font-weight: 700; }

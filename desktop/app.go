@@ -228,6 +228,16 @@ func comparisonKey(directory, currentRevision, compareRevision, packageDirectory
 	return strings.Join([]string{directory, currentRevision, compareRevision, packageDirectory, packageName, filePath}, "\x00")
 }
 
+func languageForFile(filePath string) string {
+	switch strings.ToLower(filepath.Ext(filePath)) {
+	case ".ts":
+		return "typescript"
+	case ".html", ".htm":
+		return "html"
+	}
+	return "go"
+}
+
 func (a *App) comparisonState(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string) (*engine.WorkingState, error) {
 	if a.comparisonStates == nil {
 		a.comparisonStates = make(map[string]*engine.WorkingState)
@@ -244,7 +254,7 @@ func (a *App) comparisonState(directory, currentRevision, compareRevision, packa
 	if err != nil {
 		return nil, err
 	}
-	state, err := engine.NewWorkingStateFromSource(current, compare)
+	state, err := engine.NewWorkingStateFromLanguage(languageForFile(filePath), current, compare)
 	if err != nil {
 		return nil, fmt.Errorf("compare %s: %w", filePath, err)
 	}
@@ -254,7 +264,7 @@ func (a *App) comparisonState(directory, currentRevision, compareRevision, packa
 
 func summarizeComparisonState(state *engine.WorkingState) FileEditState {
 	snapshot := state.Snapshot()
-	validation := state.ValidateGo()
+	validation := state.Validate()
 	views := engine.ProjectEdits(snapshot.Edits, liftOptions(defaultHiddenKinds()))
 	summarize := func(index int) EditSummary {
 		edit := snapshot.Edits[index]
@@ -294,6 +304,22 @@ func (a *App) ApplyFileEdit(directory, currentRevision, compareRevision, package
 	return summarizeComparisonState(state), nil
 }
 
+// ApplyFileEditSubtree applies an edit and all of its dependent child edits.
+func (a *App) ApplyFileEditSubtree(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string, index int) (FileEditState, error) {
+	absolute, err := filepath.Abs(directory)
+	if err != nil {
+		return FileEditState{}, err
+	}
+	state, err := a.comparisonState(absolute, currentRevision, compareRevision, packageDirectory, packageName, filePath)
+	if err != nil {
+		return FileEditState{}, err
+	}
+	if err := state.ApplyProjectedSubtree(index, engine.ApplyOptions{Reconcile: true}, liftOptions(defaultHiddenKinds())); err != nil {
+		return FileEditState{}, err
+	}
+	return summarizeComparisonState(state), nil
+}
+
 func (a *App) RemoveFileEdit(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string, index int) (FileEditState, error) {
 	absolute, err := filepath.Abs(directory)
 	if err != nil {
@@ -304,6 +330,22 @@ func (a *App) RemoveFileEdit(directory, currentRevision, compareRevision, packag
 		return FileEditState{}, err
 	}
 	if err := state.RemoveProjected(index, liftOptions(defaultHiddenKinds())); err != nil {
+		return FileEditState{}, err
+	}
+	return summarizeComparisonState(state), nil
+}
+
+// RemoveFileEditSubtree removes an edit and all of its dependent child edits.
+func (a *App) RemoveFileEditSubtree(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string, index int) (FileEditState, error) {
+	absolute, err := filepath.Abs(directory)
+	if err != nil {
+		return FileEditState{}, err
+	}
+	state, err := a.comparisonState(absolute, currentRevision, compareRevision, packageDirectory, packageName, filePath)
+	if err != nil {
+		return FileEditState{}, err
+	}
+	if err := state.RemoveProjectedSubtree(index, liftOptions(defaultHiddenKinds())); err != nil {
 		return FileEditState{}, err
 	}
 	return summarizeComparisonState(state), nil

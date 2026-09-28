@@ -16,6 +16,8 @@ export function ApplyEditWithOptions(arg1:number,arg2:boolean):Promise<main.Prog
 
 export function ApplyFileEdit(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:number):Promise<main.FileEditState>;
 
+export function ApplyFileEditSubtree(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:number):Promise<main.FileEditState>;
+
 export function BackInquiry(arg1:string,arg2:string):Promise<workspace.State>;
 
 export function CloseInquiryColumn(arg1:string,arg2:string):Promise<workspace.State>;
@@ -83,6 +85,8 @@ export function RemoveEditSubtree(arg1:number):Promise<main.ProgramSnapshot>;
 export function RemoveEditView(arg1:number,arg2:Array<string>):Promise<main.ProgramSnapshot>;
 
 export function RemoveFileEdit(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:number):Promise<main.FileEditState>;
+
+export function RemoveFileEditSubtree(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:number):Promise<main.FileEditState>;
 
 export function SelectRevision(arg1:string,arg2:string):Promise<workspace.State>;
 

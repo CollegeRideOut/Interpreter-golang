@@ -186,6 +186,33 @@ func (state *WorkingState) ValidateGo() ValidationReport {
 	return ValidationReport{Valid: len(diagnostics) == 0, Diagnostics: diagnostics}
 }
 
+// Validate reports structural diagnostics using the language carried by the
+// working tree. TypeScript syntax trees currently rely on parser error nodes;
+// semantic type checking is intentionally outside this engine layer.
+func (state *WorkingState) Validate() ValidationReport {
+	if state == nil {
+		return ValidationReport{Valid: false, Diagnostics: []string{"working state is nil"}}
+	}
+	if state.working == nil || (state.working.Language != "typescript" && state.working.Language != "html") {
+		return state.ValidateGo()
+	}
+	diagnostics := make([]string, 0)
+	var walk func(*structuralASTNode)
+	walk = func(node *structuralASTNode) {
+		if node == nil {
+			return
+		}
+		if node.Kind == node.Language+":ERROR" {
+			diagnostics = append(diagnostics, node.Language+" syntax error")
+		}
+		for _, child := range node.Children {
+			walk(child)
+		}
+	}
+	walk(state.working)
+	return ValidationReport{Valid: len(diagnostics) == 0, Diagnostics: diagnostics}
+}
+
 func childrenForField(node *structuralASTNode, field string) []*structuralASTNode {
 	children := make([]*structuralASTNode, 0)
 	for _, child := range node.Children {

@@ -17,8 +17,48 @@ func RenderBestEffort(root *Node) RenderResult {
 		result.Diagnostics = []string{"working tree is empty"}
 		return result
 	}
+	if root.Language == "typescript" || root.Language == "html" {
+		result.Code = strings.TrimSpace(renderTypeScriptNode(root)) + "\n"
+		return result
+	}
 	result.Code = strings.TrimSpace(renderNode(root, 0, &result.Diagnostics)) + "\n"
 	return result
+}
+
+func renderTypeScriptNode(node *structuralASTNode) string {
+	if node == nil {
+		return ""
+	}
+	if len(node.Children) == 0 {
+		return node.Value
+	}
+	if node.StartByte > node.EndByte || node.EndByte > uint(len(node.source)) {
+		parts := make([]string, 0, len(node.Children))
+		for _, child := range node.Children {
+			parts = append(parts, renderTypeScriptNode(child))
+		}
+		return strings.Join(parts, "")
+	}
+	base := node.source[node.StartByte:node.EndByte]
+	var builder strings.Builder
+	cursor := uint(0)
+	for _, child := range node.Children {
+		if child.StartByte < node.StartByte || child.StartByte > node.EndByte || child.EndByte < child.StartByte {
+			builder.WriteString(renderTypeScriptNode(child))
+			continue
+		}
+		start := child.StartByte - node.StartByte
+		end := child.EndByte - node.StartByte
+		if start < cursor || end > uint(len(base)) {
+			builder.WriteString(renderTypeScriptNode(child))
+			continue
+		}
+		builder.Write(base[cursor:start])
+		builder.WriteString(renderTypeScriptNode(child))
+		cursor = end
+	}
+	builder.Write(base[cursor:])
+	return builder.String()
 }
 
 func renderNode(node *structuralASTNode, indent int, diagnostics *[]string) string {

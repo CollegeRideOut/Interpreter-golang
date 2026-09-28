@@ -20,7 +20,9 @@ function fakeEngine(initialState?: HeadlessState, fileEdits: EditSummary[] = [{ 
     getFileEdits: async () => fileEdits,
     getFileEditState: async () => fileEditState(),
     applyFileEdit: async () => fileEditState('applied'),
+    applyFileEditSubtree: async () => fileEditState('applied'),
     removeFileEdit: async () => fileEditState('removed'),
+    removeFileEditSubtree: async () => fileEditState('removed'),
     startInquiry: async () => {
       state = { ...state, revision: state.revision + 1, rows: [...state.rows, { id: 'row-2', title: 'New inquiry', tiles: state.rows[0].tiles.slice(0, 1) }] };
       return state;
@@ -172,6 +174,21 @@ describe('App', () => {
     ].filter((edit) => edit.startLine !== 1), declaration);
 
     expect(tree.map((node) => node.id)).toEqual(['body']);
+  });
+
+  it('shows full-line actions for edits with child edits', async () => {
+    render(<App providedEngine={fakeEngine({
+      revision: 1,
+      program: { path: '/tmp/example' },
+      rows: [{ id: 'row-1', title: 'Program inquiry', tiles: [{ id: 'tile-1', column: 0, target: { kind: 'file', packageName: 'main', filePath: 'main.go' }, overview: { kind: 'file', title: 'main.go', declarations: [] }, text: {}, panes: { overviewCollapsed: false, textCollapsed: false } }] }],
+      active: { rowId: 'row-1', tileId: 'tile-1' },
+    }, [
+      { index: 0, kind: 'UPDATE', nodeId: 'parent', nodeKind: '*ast.AssignStmt', position: 0 },
+      { index: 1, kind: 'UPDATE', nodeId: 'child', nodeKind: '*ast.BasicLit', parentId: 'parent', position: 0 },
+    ])} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate edits' }));
+    expect((await screen.findAllByRole('button', { name: 'Apply full line' })).length).toBeGreaterThan(0);
   });
 
   it('renders declaration inquiries with declaration-only source and edits', async () => {

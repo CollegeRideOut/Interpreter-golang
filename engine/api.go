@@ -2,7 +2,7 @@ package engine
 
 import "fmt"
 
-// Node is the structural representation of a Go AST node.
+// Node is the language-neutral structural representation of a parsed source node.
 //
 // Nodes are intentionally editable even when the resulting tree is not valid
 // Go. ValidateGo reports structural diagnostics without discarding the tree.
@@ -19,6 +19,43 @@ type EditAncestor struct {
 	Value     string `json:"value,omitempty"`
 	StartLine int    `json:"startLine,omitempty"`
 	EndLine   int    `json:"endLine,omitempty"`
+}
+
+// ParseLanguage parses source using the adapter for language.
+func ParseLanguage(language string, source []byte) (*Node, error) {
+	switch language {
+	case "go":
+		return Parse(source)
+	case "typescript", "ts":
+		return ParseTypeScript(source)
+	case "html", "htm":
+		return ParseHTML(source)
+	default:
+		return nil, fmt.Errorf("unsupported language %q", language)
+	}
+}
+
+// DiffLanguage computes an edit script using the adapter for language.
+func DiffLanguage(language string, source, target []byte) (sourceTree, targetTree *Node, edits []Edit, err error) {
+	switch language {
+	case "go":
+		return Diff(source, target)
+	case "typescript", "ts":
+		return DiffTypeScript(source, target)
+	case "html", "htm":
+		return DiffHTML(source, target)
+	default:
+		return nil, nil, nil, fmt.Errorf("unsupported language %q", language)
+	}
+}
+
+// NewWorkingStateFromLanguage creates an editable session using a language adapter.
+func NewWorkingStateFromLanguage(language string, source, target []byte) (*WorkingState, error) {
+	sourceTree, targetTree, edits, err := DiffLanguage(language, source, target)
+	if err != nil {
+		return nil, err
+	}
+	return NewWorkingState(sourceTree, targetTree, edits)
 }
 
 // ApplyOptions controls how an edit is applied to the working tree.

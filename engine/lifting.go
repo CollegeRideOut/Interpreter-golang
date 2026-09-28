@@ -126,6 +126,22 @@ func (state *WorkingState) ApplyProjected(index int, options ApplyOptions, lifti
 	return nil
 }
 
+// ApplyProjectedSubtree applies a projected edit and all dependent children.
+func (state *WorkingState) ApplyProjectedSubtree(index int, options ApplyOptions, lifting LiftOptions) error {
+	if err := state.ApplyProjected(index, options, lifting); err != nil {
+		return err
+	}
+	parentID := editIdentity(state.edits[index])
+	for childIndex, edit := range state.edits {
+		if editParentIdentity(edit) == parentID {
+			if err := state.ApplyProjectedSubtree(childIndex, options, lifting); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // replacementEdits keeps a delete/insert pair for the same AST slot together.
 // Applying only one side of a replacement can leave an intermediate tree such
 // as `_ =`, which is useful internally but misleading as a user action.
@@ -179,6 +195,26 @@ func (state *WorkingState) RemoveProjected(index int, lifting LiftOptions) error
 		parentID = editParentIdentity(state.edits[parentIndex])
 	}
 	return nil
+}
+
+// RemoveProjectedSubtree removes a projected edit and all dependent children.
+func (state *WorkingState) RemoveProjectedSubtree(index int, lifting LiftOptions) error {
+	if err := state.checkEditIndex(index); err != nil {
+		return err
+	}
+	parentID := editIdentity(state.edits[index])
+	children := make([]int, 0)
+	for childIndex, edit := range state.edits {
+		if editParentIdentity(edit) == parentID {
+			children = append(children, childIndex)
+		}
+	}
+	for _, childIndex := range children {
+		if err := state.RemoveProjectedSubtree(childIndex, lifting); err != nil {
+			return err
+		}
+	}
+	return state.RemoveProjected(index, lifting)
 }
 
 func (state *WorkingState) hasAppliedChildren(parentID string) bool {

@@ -185,7 +185,9 @@ export interface InquiryEngine {
   getFileEdits(directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string): Promise<EditSummary[]>;
   getFileEditState(directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string): Promise<FileEditState>;
   applyFileEdit(directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string, index: number): Promise<FileEditState>;
+  applyFileEditSubtree(directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string, index: number): Promise<FileEditState>;
   removeFileEdit(directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string, index: number): Promise<FileEditState>;
+  removeFileEditSubtree(directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string, index: number): Promise<FileEditState>;
   startInquiry(title: string): Promise<HeadlessState>;
   openPackage(rowID: string, tileID: string, packageDirectory: string, packageName: string): Promise<HeadlessState>;
   navigatePackage(rowID: string, tileID: string, packageDirectory: string, packageName: string): Promise<HeadlessState>;
@@ -209,7 +211,9 @@ type WailsEngine = {
   GetFileEdits: (directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string) => Promise<EditSummary[]>;
   GetFileEditState: (directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string) => Promise<FileEditState>;
   ApplyFileEdit: (directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string, index: number) => Promise<FileEditState>;
+  ApplyFileEditSubtree: (directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string, index: number) => Promise<FileEditState>;
   RemoveFileEdit: (directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string, index: number) => Promise<FileEditState>;
+  RemoveFileEditSubtree: (directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string, index: number) => Promise<FileEditState>;
   GetCurrentState: () => Promise<HeadlessState>;
   GetRevisionContext: (directory: string) => Promise<RevisionContext>;
   StartInquiry: (title: string) => Promise<HeadlessState>;
@@ -258,7 +262,9 @@ export function createWailsEngine(): InquiryEngine {
     getFileEdits: (directory, currentRevision, compareRevision, packageDirectory, packageName, filePath) => app().GetFileEdits(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath),
     getFileEditState: (directory, currentRevision, compareRevision, packageDirectory, packageName, filePath) => app().GetFileEditState(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath),
     applyFileEdit: (directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, index) => app().ApplyFileEdit(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, index),
+    applyFileEditSubtree: (directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, index) => app().ApplyFileEditSubtree(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, index),
     removeFileEdit: (directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, index) => app().RemoveFileEdit(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, index),
+    removeFileEditSubtree: (directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, index) => app().RemoveFileEditSubtree(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, index),
     startInquiry: (title) => app().StartInquiry(title),
     openPackage: (rowID, tileID, packageDirectory, packageName) => app().OpenInquiryPackage(rowID, tileID, packageDirectory, packageName),
     navigatePackage: (rowID, tileID, packageDirectory, packageName) => app().NavigateInquiryPackage(rowID, tileID, packageDirectory, packageName),

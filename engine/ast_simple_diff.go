@@ -25,6 +25,9 @@ type structuralASTNode struct {
 	CurrentIndex           int    `json:"currentIndex,omitempty"`
 	StartLine              int    `json:"startLine,omitempty"`
 	EndLine                int    `json:"endLine,omitempty"`
+	StartByte              uint   `json:"-"`
+	EndByte                uint   `json:"-"`
+	Language               string `json:"language,omitempty"`
 
 	Kind     string               `json:"kind"`
 	Value    string               `json:"value,omitempty"`
@@ -32,6 +35,7 @@ type structuralASTNode struct {
 	Index    int                  `json:"index,omitempty"`
 	Children []*structuralASTNode `json:"children,omitempty"`
 	parent   *structuralASTNode
+	source   []byte
 }
 
 type structuralEdit struct {
@@ -177,6 +181,10 @@ func (node *structuralASTNode) clone() *structuralASTNode {
 func simpleASTEditScripts(source, target goast.Node, sourceFileSet, targetFileSet *token.FileSet) []structuralEdit {
 	sourceTree := structuralASTTree(source, sourceFileSet)
 	targetTree := structuralASTTree(target, targetFileSet)
+	return simpleStructuralEditScripts(sourceTree, targetTree)
+}
+
+func simpleStructuralEditScripts(sourceTree, targetTree *structuralASTNode) []structuralEdit {
 	linkStructuralIdentities(sourceTree, targetTree)
 	edits := make([]structuralEdit, 0)
 	compareStructuralNodes(sourceTree, targetTree, nil, &edits)

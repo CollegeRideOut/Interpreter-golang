@@ -220,9 +220,9 @@ polluting the current path.
 
 ## Structural AST Model
 
-The engine parses Go into a structural tree and tracks identity across source
-and target revisions. Numeric indexes and raw AST pointers are not durable
-identities. Edits therefore retain:
+The engine parses source through a language adapter into a structural tree and
+tracks identity across source and target revisions. Numeric indexes and raw AST
+pointers are not durable identities. Edits therefore retain:
 
 - Node identity and global identity.
 - Source and target identity where both exist.
@@ -233,11 +233,13 @@ identities. Edits therefore retain:
 - Render diagnostics.
 - Working-state revision.
 
-The renderer must preserve useful syntax for common Go nodes, including type
+The Go adapter preserves useful syntax for common Go nodes, including type
 specifications, composite literals, key/value elements, arrays, maps, structs,
-interfaces, functions, and their nested expressions. Incomplete intermediate
-states are allowed, but they should be rendered with explicit diagnostics
-rather than silently discarded.
+interfaces, functions, and their nested expressions. The Tree-sitter adapters
+currently support syntax-focused TypeScript and HTML trees while reusing the
+same identity, diff, lifting, application, and removal machinery. Incomplete
+intermediate states are allowed, but they should be rendered with explicit
+diagnostics rather than silently discarded.
 
 Parsing, rendering, compilation, type checking, and tests are observations of a
 program state. They should inform the next inquiry, not erase the state.
@@ -288,23 +290,36 @@ The repository currently contains experiments for:
 - Declaration-level comparison inquiries and cousin columns in the React UI.
 - A Wails desktop application.
 - A multi-package calorie-app fixture for dependency exploration.
+- A language-adapter seam with syntax-focused TypeScript and HTML support.
 
 The prototype is not yet a complete multi-file transformation environment.
-Reference, call, type, and impact analysis are still developing. The important
+Reference, call, type, and impact analysis are still developing. TypeScript and
+HTML are available through the engine and file comparison path, but workspace
+discovery and declaration exploration remain Go-specific. The important
 near-term goal is to make the inquiry and edit model correct and understandable
 before adding more automation.
 
 ## Running It
 
-Run the Go prototype:
+Run the root tests:
 
 ```bash
+go test ./...
 ```
 
 Build or test the desktop application:
 
 ```bash
 cd desktop
+go test ./...
+```
+
+The frontend tests and production build are run from
+`desktop/frontend-react/`:
+
+```bash
+npm test -- --run
+npm run build
 ```
 
 The packaged desktop binary is written to:

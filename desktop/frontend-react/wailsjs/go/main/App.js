@@ -26,6 +26,10 @@ export function ApplyFileEdit(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
   return window['go']['main']['App']['ApplyFileEdit'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }
 
+export function ApplyFileEditSubtree(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
+  return window['go']['main']['App']['ApplyFileEditSubtree'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+}
+
 export function BackInquiry(arg1, arg2) {
   return window['go']['main']['App']['BackInquiry'](arg1, arg2);
 }
@@ -160,6 +164,10 @@ export function RemoveEditView(arg1, arg2) {
 
 export function RemoveFileEdit(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
   return window['go']['main']['App']['RemoveFileEdit'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+}
+
+export function RemoveFileEditSubtree(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
+  return window['go']['main']['App']['RemoveFileEditSubtree'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }
 
 export function SelectRevision(arg1, arg2) {

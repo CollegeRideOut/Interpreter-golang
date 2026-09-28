@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { App, buildComparisonTree, buildEditInquiries } from './App';
 import type { EditSummary, FileEditState, HeadlessState, InquiryEngine } from './inquiryEngine';
 
-function fakeEngine(initialState?: HeadlessState, fileEdits: EditSummary[] = [{ index: 0, kind: 'UPDATE', nodeId: 'main.Decl', nodeKind: '*ast.FuncDecl', field: 'Body', position: 0, startLine: 1, endLine: 3 }], onOpenFile?: (path: string) => void): InquiryEngine {
+function fakeEngine(initialState?: HeadlessState, fileEdits: EditSummary[] = [{ index: 0, kind: 'UPDATE', nodeId: 'main.Decl', nodeKind: '*ast.FuncDecl', field: 'Body', position: 0, startLine: 1, endLine: 3 }], onOpenFile?: (path: string) => void, workingCode = ''): InquiryEngine {
   let state: HeadlessState = initialState ?? {
     revision: 1,
     program: { path: '/tmp/example' },
@@ -11,7 +11,7 @@ function fakeEngine(initialState?: HeadlessState, fileEdits: EditSummary[] = [{ 
     active: { rowId: 'row-1', tileId: 'tile-1' },
   };
   const result = async () => state;
-  const fileEditState = (status?: EditSummary['status']): FileEditState => ({ edits: fileEdits.map((edit) => ({ ...edit, status })), workingCode: '', valid: true });
+  const fileEditState = (status?: EditSummary['status']): FileEditState => ({ edits: fileEdits.map((edit) => ({ ...edit, status })), workingCode, valid: true });
   return {
     getCurrentState: result,
     getRevisionContext: async () => ({ branch: 'main', currentCommit: 'abc1234', options: [{ kind: 'branch', ref: 'main', hash: 'abc1234', shortHash: 'abc1234', date: '2026-09-14T13:29:59-04:00', subject: 'latest change' }] }),
@@ -179,9 +179,9 @@ describe('App', () => {
       rows: [{ id: 'row-1', title: 'Program inquiry', tiles: [{ id: 'tile-1', column: 0, target: { kind: 'declaration', packageName: 'main', packagePath: '', filePath: 'main.go', declarationName: 'main', line: 3 }, overview: { kind: 'declaration', title: 'main', subtitle: 'function', declarations: [{ kind: 'function', name: 'main', line: 3, endLine: 8, exported: false }], references: [] }, text: { content: 'func main() {\n\twork()\n}', sourceStartLine: 3 }, panes: { overviewCollapsed: false, textCollapsed: false } }] }],
       active: { rowId: 'row-1', tileId: 'tile-1' },
     }, [
-      { index: 0, kind: 'UPDATE', nodeId: 'file', nodeKind: '*ast.File', position: 0, startLine: 1, endLine: 10 },
+      { index: 0, kind: 'INSERT', nodeId: 'import', nodeKind: '*ast.GenDecl', position: 0, startLine: 3, endLine: 3 },
       { index: 1, kind: 'UPDATE', nodeId: 'body', nodeKind: '*ast.BlockStmt', position: 1, startLine: 3, endLine: 8, ancestors: [{ nodeId: 'file', nodeKind: '*ast.File', startLine: 1, endLine: 10 }] },
-    ])} />);
+    ], undefined, 'package main\n\nimport "fmt"\n\nfunc main() {\n\twork()\n}\n')} />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Generate edits' }));
     expect(await screen.findByText('Compared edits (1)')).toBeInTheDocument();

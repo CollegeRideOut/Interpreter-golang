@@ -404,7 +404,7 @@ function formatRevisionDate(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-export function buildComparisonTree(edits: EditSummary[], scope?: Declaration): ComparisonTreeNode[] {
+export function buildComparisonTree(edits: EditSummary[], scope?: Declaration, excludedScopes: Declaration[] = []): ComparisonTreeNode[] {
   const roots: ComparisonTreeNode[] = [];
   const nodes = new Map<string, ComparisonTreeNode>();
 
@@ -423,7 +423,7 @@ export function buildComparisonTree(edits: EditSummary[], scope?: Declaration): 
 
   for (const edit of edits) {
     let parent: ComparisonTreeNode | undefined;
-    const ancestors = (edit.ancestors ?? (edit.ancestorIds ?? (edit.parentId ? [edit.parentId] : [])).map((nodeId) => ({ nodeId, nodeKind: nodeId === edit.parentId ? (edit.parentKind ?? 'AST node') : 'AST node' }))).filter((ancestor) => !scope || !ancestor.startLine || !ancestor.endLine || (ancestor.startLine >= scope.line && ancestor.endLine <= scope.endLine));
+    const ancestors = (edit.ancestors ?? (edit.ancestorIds ?? (edit.parentId ? [edit.parentId] : [])).map((nodeId) => ({ nodeId, nodeKind: nodeId === edit.parentId ? (edit.parentKind ?? 'AST node') : 'AST node' }))).filter((ancestor) => (!scope || !ancestor.startLine || !ancestor.endLine || (ancestor.startLine >= scope.line && ancestor.endLine <= scope.endLine)) && !excludedScopes.some((excluded) => editBelongsToDeclaration({ startLine: ancestor.startLine, endLine: ancestor.endLine, nodeKind: ancestor.nodeKind } as EditSummary, excluded) || declarationNodeKind(ancestor.nodeKind, excluded)));
     for (const ancestor of ancestors) {
       const identity = ancestor.globalId ?? ancestor.nodeId;
       let node = nodes.get(identity);
@@ -530,7 +530,7 @@ function InquiryRowView({ row, editInquiries, focus, editsFor, editsForPath, wor
 }
 
 function TextRepresentation({ tile, focus, textRefs, editState }: { tile: Tile; focus: FocusTarget | null; textRefs: React.MutableRefObject<Record<string, HTMLPreElement | null>>; editState?: FileEditState }) {
-  const content = tile.target.kind === 'declaration' ? tile.text.content : editState?.workingCode || tile.text.content;
+  const content = tile.target.kind === 'declaration' ? declarationContent(tile, editState) : editState?.workingCode || tile.text.content;
   const diagnostics = [...(editState?.diagnostics ?? []), ...(editState?.renderDiagnostics ?? [])];
   if (!content) {
     return <><AstStatus editState={editState} /><pre ref={(element) => { textRefs.current[tile.id] = element; }}><code>No text representation for this target.</code></pre></>;
@@ -542,6 +542,13 @@ function TextRepresentation({ tile, focus, textRefs, editState }: { tile: Tile; 
     const matches = occurrencesForLine(tile.text.occurrences ?? [], focus, sourceLine);
     return <span className={matches.length > 0 ? 'source-line focused' : 'source-line'} data-focus-match={matches.length > 0 ? 'true' : undefined} key={`${tile.id}:${index}`}>{highlightSource(line, matches, sourceLine)}{index < lines.length - 1 ? '\n' : ''}</span>;
   })}</code></pre>{diagnostics.length > 0 && <div className="render-diagnostics">{diagnostics.map((diagnostic, index) => <div key={`${tile.id}:diagnostic:${index}`}>{diagnostic}</div>)}</div>}</>;
+}
+
+function declarationContent(tile: Tile, editState?: FileEditState): string | undefined {
+  if (!editState?.workingCode) return tile.text.content;
+  const declaration = tile.overview.declarations?.[0];
+  if (!declaration) return tile.text.content;
+  return editState.workingCode.split('\n').slice(Math.max(0, declaration.line - 1), declaration.endLine).join('\n');
 }
 
 function AstStatus({ editState }: { editState?: FileEditState }) {
@@ -613,7 +620,7 @@ function Overview({ tile, row, editInquiries, edits, comparisonActive, completeF
       return [{ declaration, child: false }, ...(declaration.children ?? []).filter((child) => fileLens === 'all' || (fileLens === 'exported' ? child.exported : !child.exported)).map((child) => ({ declaration: child, child: true }))];
       }).map(({ declaration, child }) => <TargetButton key={`${declaration.symbolId ?? declaration.name}:${declaration.line}`} label={`${child ? '↳ ' : ''}${declaration.kind} ${declaration.name}`} detail={`${declarationSignature(declaration)} · line ${declaration.line}`} canOpenLeft={tile.column > 0} onOpen={() => onDeclaration(row, tile, declaration)} onOpenLeft={() => onDeclarationLeft(row, tile, tile.target.filePath ?? '', declaration)} onOpenColumn={() => onDeclarationColumn(row, tile, tile.target.filePath ?? '', declaration)} />)}
        {(tile.target.kind === 'declaration' || overview.selectedDeclaration) && (overview.references?.length ?? 0) > 0 && <section className="overview-section references-section"><h3>{overview.selectedDeclaration ? `${overview.selectedDeclaration.kind} ${overview.selectedDeclaration.name}` : 'References'}</h3><button type="button" className="section-toggle" onClick={() => setShowReferences((visible) => !visible)}>{showReferences ? 'Hide references' : `Find references (${overview.references?.length})`}</button>{showReferences && overview.references?.map((reference) => <ReferenceButton key={`${reference.filePath}:${reference.referenceLine ?? reference.line}`} reference={reference} canOpenLeft={tile.column > 0} onOpen={() => onInspectReference(row, tile, reference)} onOpenLeft={() => onOpenReferenceLeft(row, tile, reference)} onOpenColumn={() => onOpenReferenceColumn(row, tile, reference)} />)}</section>}
-        {comparisonActive && (tile.target.kind === 'file' || tile.target.kind === 'declaration') ? <ComparisonTreeSection tile={tile} edits={visibleComparisonEdits} completeFile={completeFile} onCompleteFileChange={onCompleteFileChange} onApplyEdit={onApplyEdit} onOpenDeclaration={(declaration) => onDeclarationColumn(row, tile, tile.target.filePath ?? '', declaration)} /> : editsForDeclaration(edits, editDeclaration).length > 0 && <EditSection edits={editsForDeclaration(edits, editDeclaration)} />}
+        {comparisonActive && (tile.target.kind === 'file' || tile.target.kind === 'declaration') ? <ComparisonTreeSection tile={tile} edits={visibleComparisonEdits} excludedDeclarations={openedDeclarations} completeFile={completeFile} onCompleteFileChange={onCompleteFileChange} onApplyEdit={onApplyEdit} onOpenDeclaration={(declaration) => onDeclarationColumn(row, tile, tile.target.filePath ?? '', declaration)} /> : editsForDeclaration(edits, editDeclaration).length > 0 && <EditSection edits={editsForDeclaration(edits, editDeclaration)} />}
     </div>;
 }
 
@@ -629,10 +636,10 @@ function StructuralEditGroup({ inquiry, file, index, onApplyEdit, onOpenDeclarat
   return <div className="structural-edit-group"><div className="structural-edit-label"><button type="button" className="structural-edit-toggle" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>{expanded ? '−' : '+'}</button>{inquiry.declaration ? <button type="button" className="structural-edit-open" onClick={() => onOpenDeclaration(file.path, inquiry.declaration)}>{label}</button> : <span>{label}</span>}<span>{file.path}</span></div>{expanded && tree.map((node) => <ComparisonTreeNodeView key={`${inquiry.id}:${index}:${node.id}`} node={node} depth={0} packageDirectory={file.packageDirectory} packageName={file.packageName} file={file.path} onApplyEdit={onApplyEdit} />)}</div>;
 }
 
-function ComparisonTreeSection({ tile, edits, completeFile, onCompleteFileChange, onApplyEdit, onOpenDeclaration }: { tile: Tile; edits: EditSummary[]; completeFile: boolean; onCompleteFileChange: (value: boolean) => void; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary) => void; onOpenDeclaration: (declaration: Declaration) => void }) {
+function ComparisonTreeSection({ tile, edits, excludedDeclarations, completeFile, onCompleteFileChange, onApplyEdit, onOpenDeclaration }: { tile: Tile; edits: EditSummary[]; excludedDeclarations: Declaration[]; completeFile: boolean; onCompleteFileChange: (value: boolean) => void; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary) => void; onOpenDeclaration: (declaration: Declaration) => void }) {
   const declaration = tile.target.kind === 'declaration' ? tile.overview.declarations?.[0] : undefined;
   const scopedEdits = declaration ? edits.filter((edit) => editBelongsToDeclaration(edit, declaration)) : edits;
-  const tree = buildComparisonTree(scopedEdits, declaration);
+  const tree = buildComparisonTree(scopedEdits, declaration, excludedDeclarations);
   const declarations = tile.target.kind === 'file' ? (tile.overview.declarations ?? []).filter((declaration) => editsForDeclaration(edits, declaration).length > 0) : [];
   return <section className="overview-section edit-section comparison-results"><div className="comparison-tree-heading"><div><h3>Compared edits ({scopedEdits.length})</h3><p>{declaration ? `Edits inside ${declaration.kind} ${declaration.name}.` : 'Complete canonical edit tree. Structural replacements apply together.'}</p></div><div className="comparison-heading-actions"><span className="comparison-scope">{declaration ? 'Declaration' : 'Complete file'}</span>{declarations.map((declaration) => <button type="button" className="open-inquiry-button" key={`${declaration.symbolId ?? declaration.name}:${declaration.line}`} onClick={() => onOpenDeclaration(declaration)}>Open {declaration.kind} {declaration.name} inquiry</button>)}</div></div>{tree.length === 0 ? <p className="empty-note">No edits in this scope.</p> : <div className="comparison-tree">{tree.map((node) => <ComparisonTreeNodeView key={node.id} node={node} depth={0} packageDirectory={tile.target.packagePath ?? ''} packageName={tile.target.packageName ?? ''} file={tile.target.filePath ?? ''} onApplyEdit={onApplyEdit} />)}</div>}</section>;
 }
@@ -655,7 +662,15 @@ function editsForDeclaration(edits: EditSummary[], declaration?: Declaration): E
 }
 
 function editBelongsToDeclaration(edit: EditSummary, declaration: Declaration): boolean {
-  return edit.startLine !== undefined && edit.endLine !== undefined && edit.startLine >= declaration.line && edit.endLine <= declaration.endLine;
+  if (edit.startLine === undefined || edit.endLine === undefined || edit.startLine < declaration.line || edit.endLine > declaration.endLine) return false;
+  if (edit.startLine === declaration.line && edit.endLine === declaration.line && !edit.nodeKind.replace('*ast.', '').toLowerCase().includes(declaration.kind.toLowerCase())) return false;
+  return true;
+}
+
+function declarationNodeKind(nodeKind: string, declaration: Declaration): boolean {
+  const normalized = nodeKind.replace('*ast.', '').toLowerCase();
+  const expected = declaration.kind === 'function' || declaration.kind === 'method' ? 'funcdecl' : declaration.kind === 'type' ? 'typespec' : declaration.kind.toLowerCase();
+  return normalized === expected;
 }
 
 function EditSection({ edits }: { edits: EditSummary[] }) {

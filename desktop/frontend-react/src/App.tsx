@@ -37,6 +37,7 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
   const [engine] = useState<InquiryEngine>(() => providedEngine ?? createWailsEngine());
   const [focus, setFocus] = useState<FocusTarget | null>(null);
   const textRefs = useRef<Record<string, HTMLPreElement | null>>({});
+  const comparisonOpenKey = useRef<string | null>(null);
   const [lenses, setLenses] = useState<Record<string, PackageLens | FileLens>>({});
 
   useEffect(() => {
@@ -71,8 +72,24 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
         throw reason instanceof Error ? reason : new Error('Unable to load comparison edits.');
       }
     });
-    Promise.all(requests).then((entries) => {
-      setEditMap((current) => ({ ...current, ...Object.fromEntries(entries) }));
+    Promise.all(requests).then(async (entries) => {
+      const nextEditMap = Object.fromEntries(entries);
+      setEditMap(nextEditMap);
+      const openKey = `${currentRevision}:${compareRevision}`;
+      if (comparisonOpenKey.current === openKey) return;
+      const inquiry = buildEditInquiries(state, nextEditMap).find((candidate) => candidate.declaration);
+      const file = inquiry?.columns[0]?.[0];
+      const row = state.rows.find((candidate) => candidate.id === state.active.rowId) ?? state.rows.find((candidate) => candidate.title === 'Program inquiry');
+      const tile = row?.tiles.find((candidate) => candidate.id === state.active.tileId) ?? row?.tiles.find((candidate) => candidate.target.kind === 'program');
+      if (!inquiry?.declaration || !file || !row || !tile) return;
+      comparisonOpenKey.current = openKey;
+      try {
+        const nextState = await engine.openDeclaration(row.id, tile.id, file.packageDirectory, file.packageName, file.path, inquiry.declaration.name, inquiry.declaration.line);
+        setState(nextState);
+      } catch (reason) {
+        comparisonOpenKey.current = null;
+        setError(reason instanceof Error ? reason.message : 'Unable to open the affected declaration.');
+      }
     }).catch((reason) => {
       setError(reason instanceof Error ? reason.message : 'Unable to load comparison edits.');
     });
@@ -125,6 +142,7 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
   function generateEdits() {
     setError('');
     setEditMap({});
+    comparisonOpenKey.current = null;
     setComparisonActive(true);
   }
 

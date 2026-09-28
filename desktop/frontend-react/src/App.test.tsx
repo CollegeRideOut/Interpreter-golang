@@ -178,7 +178,7 @@ describe('App', () => {
     render(<App providedEngine={fakeEngine({
       revision: 1,
       program: { path: '/tmp/example' },
-      rows: [{ id: 'row-1', title: 'Program inquiry', tiles: [{ id: 'tile-1', column: 0, target: { kind: 'declaration', packageName: 'main', packagePath: '', filePath: 'main.go', declarationName: 'main', line: 3 }, overview: { kind: 'declaration', title: 'main', subtitle: 'function', declarations: [{ kind: 'function', name: 'main', line: 3, endLine: 8, exported: false }], references: [] }, text: { content: 'func main() {\n\twork()\n}', sourceStartLine: 3 }, panes: { overviewCollapsed: false, textCollapsed: false } }] }],
+      rows: [{ id: 'row-1', title: 'Program inquiry', tiles: [{ id: 'tile-1', column: 0, target: { kind: 'declaration', packageName: 'main', packagePath: '', filePath: 'main.go', declarationName: 'main', line: 3 }, overview: { kind: 'declaration', title: 'main', subtitle: 'function', declarations: [{ kind: 'function', name: 'main', line: 3, endLine: 8, exported: false }], references: [] }, text: { content: 'package main\n\nimport "fmt"\n\nfunc main() {\n\twork()\n}', sourceStartLine: 1 }, panes: { overviewCollapsed: false, textCollapsed: false } }] }],
       active: { rowId: 'row-1', tileId: 'tile-1' },
     }, [
       { index: 0, kind: 'INSERT', nodeId: 'import', nodeKind: '*ast.GenDecl', position: 0, startLine: 3, endLine: 3 },

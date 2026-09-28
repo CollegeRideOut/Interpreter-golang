@@ -546,11 +546,11 @@ function TextRepresentation({ tile, focus, textRefs, editState }: { tile: Tile; 
 }
 
 function declarationContent(tile: Tile, editState?: FileEditState): string | undefined {
-  if (!editState?.workingCode) return tile.text.content;
   const declaration = tile.overview.declarations?.[0];
-  if (!declaration) return tile.text.content;
-  const lines = editState.workingCode.split('\n');
-  const start = Math.max(0, declaration.line - 1);
+  const source = editState?.workingCode || tile.text.content;
+  if (!declaration || !source) return source;
+  const lines = source.split('\n');
+  const start = declarationStartLine(lines, declaration);
   let depth = 0;
   let opened = false;
   for (let index = start; index < lines.length; index += 1) {
@@ -565,6 +565,16 @@ function declarationContent(tile: Tile, editState?: FileEditState): string | und
     if (opened && depth <= 0) return lines.slice(start, index + 1).join('\n');
   }
   return lines.slice(start, declaration.endLine).join('\n');
+}
+
+function declarationStartLine(lines: string[], declaration: Declaration): number {
+  const name = declaration.name;
+  const index = lines.findIndex((line) => {
+    if (!line.includes(name)) return false;
+    if (declaration.kind === 'function' || declaration.kind === 'method') return /\bfunc\b/.test(line);
+    return new RegExp(`\\b${declaration.kind}\\b`).test(line);
+  });
+  return index >= 0 ? index : Math.max(0, declaration.line - 1);
 }
 
 function AstStatus({ editState }: { editState?: FileEditState }) {

@@ -77,18 +77,18 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
       setEditMap(nextEditMap);
       const openKey = `${currentRevision}:${compareRevision}`;
       if (comparisonOpenKey.current === openKey) return;
-      const inquiry = buildEditInquiries(state, nextEditMap).find((candidate) => candidate.declaration);
+      const inquiry = buildEditInquiries(state, nextEditMap)[0];
       const file = inquiry?.columns[0]?.[0];
       const row = state.rows.find((candidate) => candidate.id === state.active.rowId) ?? state.rows.find((candidate) => candidate.title === 'Program inquiry');
       const tile = row?.tiles.find((candidate) => candidate.id === state.active.tileId) ?? row?.tiles.find((candidate) => candidate.target.kind === 'program');
-      if (!inquiry?.declaration || !file || !row || !tile) return;
+      if (!file || !row || !tile) return;
       comparisonOpenKey.current = openKey;
       try {
-        const nextState = await engine.openDeclaration(row.id, tile.id, file.packageDirectory, file.packageName, file.path, inquiry.declaration.name, inquiry.declaration.line);
+        const nextState = await engine.openFile(row.id, tile.id, file.packageDirectory, file.packageName, file.path);
         setState(nextState);
       } catch (reason) {
         comparisonOpenKey.current = null;
-        setError(reason instanceof Error ? reason.message : 'Unable to open the affected declaration.');
+        setError(reason instanceof Error ? reason.message : 'Unable to open the affected file.');
       }
     }).catch((reason) => {
       setError(reason instanceof Error ? reason.message : 'Unable to load comparison edits.');
@@ -611,7 +611,7 @@ function Overview({ tile, row, editInquiries, edits, comparisonActive, completeF
       return [{ declaration, child: false }, ...(declaration.children ?? []).filter((child) => fileLens === 'all' || (fileLens === 'exported' ? child.exported : !child.exported)).map((child) => ({ declaration: child, child: true }))];
       }).map(({ declaration, child }) => <TargetButton key={`${declaration.symbolId ?? declaration.name}:${declaration.line}`} label={`${child ? '↳ ' : ''}${declaration.kind} ${declaration.name}`} detail={`${declarationSignature(declaration)} · line ${declaration.line}`} canOpenLeft={tile.column > 0} onOpen={() => onDeclaration(row, tile, declaration)} onOpenLeft={() => onDeclarationLeft(row, tile, tile.target.filePath ?? '', declaration)} onOpenColumn={() => onDeclarationColumn(row, tile, tile.target.filePath ?? '', declaration)} />)}
        {(tile.target.kind === 'declaration' || overview.selectedDeclaration) && (overview.references?.length ?? 0) > 0 && <section className="overview-section references-section"><h3>{overview.selectedDeclaration ? `${overview.selectedDeclaration.kind} ${overview.selectedDeclaration.name}` : 'References'}</h3><button type="button" className="section-toggle" onClick={() => setShowReferences((visible) => !visible)}>{showReferences ? 'Hide references' : `Find references (${overview.references?.length})`}</button>{showReferences && overview.references?.map((reference) => <ReferenceButton key={`${reference.filePath}:${reference.referenceLine ?? reference.line}`} reference={reference} canOpenLeft={tile.column > 0} onOpen={() => onInspectReference(row, tile, reference)} onOpenLeft={() => onOpenReferenceLeft(row, tile, reference)} onOpenColumn={() => onOpenReferenceColumn(row, tile, reference)} />)}</section>}
-       {comparisonActive && (tile.target.kind === 'file' || tile.target.kind === 'declaration') ? <ComparisonTreeSection tile={tile} edits={edits} completeFile={completeFile} onCompleteFileChange={onCompleteFileChange} onApplyEdit={onApplyEdit} /> : editsForDeclaration(edits, editDeclaration).length > 0 && <EditSection edits={editsForDeclaration(edits, editDeclaration)} />}
+        {comparisonActive && (tile.target.kind === 'file' || tile.target.kind === 'declaration') ? <ComparisonTreeSection tile={tile} edits={edits} completeFile={completeFile} onCompleteFileChange={onCompleteFileChange} onApplyEdit={onApplyEdit} onOpenDeclaration={(declaration) => onDeclarationColumn(row, tile, tile.target.filePath ?? '', declaration)} /> : editsForDeclaration(edits, editDeclaration).length > 0 && <EditSection edits={editsForDeclaration(edits, editDeclaration)} />}
     </div>;
 }
 
@@ -627,9 +627,10 @@ function StructuralEditGroup({ inquiry, file, index, onApplyEdit, onOpenDeclarat
   return <div className="structural-edit-group"><div className="structural-edit-label"><button type="button" className="structural-edit-toggle" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>{expanded ? '−' : '+'}</button>{inquiry.declaration ? <button type="button" className="structural-edit-open" onClick={() => onOpenDeclaration(file.path, inquiry.declaration)}>{label}</button> : <span>{label}</span>}<span>{file.path}</span></div>{expanded && tree.map((node) => <ComparisonTreeNodeView key={`${inquiry.id}:${index}:${node.id}`} node={node} depth={0} packageDirectory={file.packageDirectory} packageName={file.packageName} file={file.path} onApplyEdit={onApplyEdit} />)}</div>;
 }
 
-function ComparisonTreeSection({ tile, edits, completeFile, onCompleteFileChange, onApplyEdit }: { tile: Tile; edits: EditSummary[]; completeFile: boolean; onCompleteFileChange: (value: boolean) => void; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary) => void }) {
+function ComparisonTreeSection({ tile, edits, completeFile, onCompleteFileChange, onApplyEdit, onOpenDeclaration }: { tile: Tile; edits: EditSummary[]; completeFile: boolean; onCompleteFileChange: (value: boolean) => void; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary) => void; onOpenDeclaration: (declaration: Declaration) => void }) {
   const tree = buildComparisonTree(edits);
-  return <section className="overview-section edit-section comparison-results"><div className="comparison-tree-heading"><div><h3>Compared edits ({edits.length})</h3><p>Complete canonical edit tree. Structural replacements apply together.</p></div><span className="comparison-scope">Complete file</span></div>{tree.length === 0 ? <p className="empty-note">No edits in this file.</p> : <div className="comparison-tree">{tree.map((node) => <ComparisonTreeNodeView key={node.id} node={node} depth={0} packageDirectory={tile.target.packagePath ?? ''} packageName={tile.target.packageName ?? ''} file={tile.target.filePath ?? ''} onApplyEdit={onApplyEdit} />)}</div>}</section>;
+  const declarations = tile.target.kind === 'file' ? (tile.overview.declarations ?? []).filter((declaration) => editsForDeclaration(edits, declaration).length > 0) : [];
+  return <section className="overview-section edit-section comparison-results"><div className="comparison-tree-heading"><div><h3>Compared edits ({edits.length})</h3><p>Complete canonical edit tree. Structural replacements apply together.</p></div><div className="comparison-heading-actions"><span className="comparison-scope">Complete file</span>{declarations.map((declaration) => <button type="button" className="open-inquiry-button" key={`${declaration.symbolId ?? declaration.name}:${declaration.line}`} onClick={() => onOpenDeclaration(declaration)}>Open {declaration.kind} {declaration.name} inquiry</button>)}</div></div>{tree.length === 0 ? <p className="empty-note">No edits in this file.</p> : <div className="comparison-tree">{tree.map((node) => <ComparisonTreeNodeView key={node.id} node={node} depth={0} packageDirectory={tile.target.packagePath ?? ''} packageName={tile.target.packageName ?? ''} file={tile.target.filePath ?? ''} onApplyEdit={onApplyEdit} />)}</div>}</section>;
 }
 
 function ComparisonTreeNodeView({ node, depth, packageDirectory, packageName, file, onApplyEdit }: { node: ComparisonTreeNode; depth: number; packageDirectory: string; packageName: string; file: string; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary) => void }) {

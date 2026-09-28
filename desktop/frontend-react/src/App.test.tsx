@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { App, buildComparisonTree, buildEditInquiries } from './App';
 import type { EditSummary, FileEditState, HeadlessState, InquiryEngine } from './inquiryEngine';
 
-function fakeEngine(initialState?: HeadlessState, fileEdits: EditSummary[] = [{ index: 0, kind: 'UPDATE', nodeId: 'main.Decl', nodeKind: '*ast.FuncDecl', field: 'Body', position: 0, startLine: 1, endLine: 3 }], onOpenDeclaration?: (name: string) => void): InquiryEngine {
+function fakeEngine(initialState?: HeadlessState, fileEdits: EditSummary[] = [{ index: 0, kind: 'UPDATE', nodeId: 'main.Decl', nodeKind: '*ast.FuncDecl', field: 'Body', position: 0, startLine: 1, endLine: 3 }], onOpenFile?: (path: string) => void): InquiryEngine {
   let state: HeadlessState = initialState ?? {
     revision: 1,
     program: { path: '/tmp/example' },
@@ -30,10 +30,12 @@ function fakeEngine(initialState?: HeadlessState, fileEdits: EditSummary[] = [{ 
     back: result,
     inspectFile: result,
     inspectDeclaration: result,
-    openFile: result,
+    openFile: async (_rowID, _tileID, _packageDirectory, _packageName, filePath) => {
+      onOpenFile?.(filePath);
+      return result();
+    },
     navigateFile: result,
     openDeclaration: async (_rowID, _tileID, _packageDirectory, _packageName, _filePath, name) => {
-      onOpenDeclaration?.(name);
       return result();
     },
     navigateDeclaration: result,
@@ -76,6 +78,7 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByText(/Highlighting Run/)).toBeInTheDocument());
     fireEvent.click(await screen.findByRole('button', { name: 'Generate edits' }));
     expect((await screen.findAllByText('Compared edits (1)')).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Open function Run inquiry' })).toBeInTheDocument();
     expect(document.querySelector('mark')?.textContent).toBe('Run');
   });
 
@@ -122,19 +125,19 @@ describe('App', () => {
   });
 
   it('shows comparison results from the program explorer tile', async () => {
-    let openedDeclaration = '';
+    let openedFile = '';
     render(<App providedEngine={fakeEngine({
       revision: 1,
       program: { path: '/tmp/example' },
       rows: [{ id: 'row-1', title: 'Program inquiry', tiles: [{ id: 'tile-1', column: 0, target: { kind: 'program' }, overview: { kind: 'program', title: 'example', packages: [{ name: 'main', directory: '', fileCount: 1, files: [{ name: 'main.go', path: 'main.go', declarations: [{ kind: 'function', name: 'main', line: 1, endLine: 3, exported: false }] }] }] }, text: {}, panes: { overviewCollapsed: false, textCollapsed: false } }] }],
       active: { rowId: 'row-1', tileId: 'tile-1' },
-    }, undefined, (name) => { openedDeclaration = name; })} />);
+    }, undefined, (path) => { openedFile = path; })} />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Generate edits' }));
     expect(await screen.findAllByText('main.go')).not.toHaveLength(0);
     expect(screen.getByText('Structural edits (1)')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'function main' })).toBeInTheDocument();
-    await waitFor(() => expect(openedDeclaration).toBe('main'));
+    await waitFor(() => expect(openedFile).toBe('main.go'));
   });
 
   it('renders cousin branches beneath one shared ancestor', async () => {

@@ -1,5 +1,5 @@
 export namespace engine {
-
+	
 	export class EditAncestor {
 	    nodeId: string;
 	    globalId?: string;
@@ -8,11 +8,11 @@ export namespace engine {
 	    value?: string;
 	    startLine?: number;
 	    endLine?: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new EditAncestor(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.nodeId = source["nodeId"];
@@ -29,11 +29,11 @@ export namespace engine {
 	    depth: number;
 	    hasChildren: boolean;
 	    descendantCount: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new EditView(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.editIndex = source["editIndex"];
@@ -53,11 +53,11 @@ export namespace engine {
 	    currentPath?: string;
 	    canReconcile: boolean;
 	    reason?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ReconciliationCandidate(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.nodeId = source["nodeId"];
@@ -92,11 +92,11 @@ export namespace engine {
 	    field?: string;
 	    index?: number;
 	    children?: structuralASTNode[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new structuralASTNode(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -119,7 +119,7 @@ export namespace engine {
 	        this.index = source["index"];
 	        this.children = this.convertValues(source["children"], structuralASTNode);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -154,11 +154,11 @@ export namespace engine {
 	    position: number;
 	    value?: string;
 	    node?: structuralASTNode;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new structuralEdit(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.index = source["index"];
@@ -177,7 +177,7 @@ export namespace engine {
 	        this.value = source["value"];
 	        this.node = this.convertValues(source["node"], structuralASTNode);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -200,7 +200,7 @@ export namespace engine {
 }
 
 export namespace explorer {
-
+	
 	export class Reference {
 	    symbolId?: string;
 	    name: string;
@@ -212,11 +212,11 @@ export namespace explorer {
 	    declaration: string;
 	    line: number;
 	    referenceLine?: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Reference(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.symbolId = source["symbolId"];
@@ -234,11 +234,11 @@ export namespace explorer {
 	export class Parameter {
 	    name?: string;
 	    type: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Parameter(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -258,11 +258,11 @@ export namespace explorer {
 	    type?: string;
 	    typeReferences?: Reference[];
 	    children?: Declaration[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Declaration(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.symbolId = source["symbolId"];
@@ -278,7 +278,7 @@ export namespace explorer {
 	        this.typeReferences = this.convertValues(source["typeReferences"], Reference);
 	        this.children = this.convertValues(source["children"], Declaration);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -304,11 +304,11 @@ export namespace explorer {
 	    startColumn: number;
 	    endLine: number;
 	    endColumn: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Occurrence(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.symbolId = source["symbolId"];
@@ -326,11 +326,11 @@ export namespace explorer {
 	    imports?: string[];
 	    occurrences?: Occurrence[];
 	    samePackageReferences?: Reference[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new File(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -340,7 +340,7 @@ export namespace explorer {
 	        this.occurrences = this.convertValues(source["occurrences"], Occurrence);
 	        this.samePackageReferences = this.convertValues(source["samePackageReferences"], Reference);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -365,11 +365,11 @@ export namespace explorer {
 	    directory: string;
 	    files?: File[];
 	    declarations?: Declaration[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ImportSummary(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -378,7 +378,7 @@ export namespace explorer {
 	        this.files = this.convertValues(source["files"], File);
 	        this.declarations = this.convertValues(source["declarations"], Declaration);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -397,18 +397,18 @@ export namespace explorer {
 		    return a;
 		}
 	}
-
+	
 	export class Package {
 	    name: string;
 	    directory: string;
 	    fileCount: number;
 	    files?: File[];
 	    localImports?: string[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Package(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -417,7 +417,7 @@ export namespace explorer {
 	        this.files = this.convertValues(source["files"], File);
 	        this.localImports = source["localImports"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -436,12 +436,12 @@ export namespace explorer {
 		    return a;
 		}
 	}
-
+	
 
 }
 
 export namespace main {
-
+	
 	export class EditSummary {
 	    index: number;
 	    kind: string;
@@ -460,11 +460,11 @@ export namespace main {
 	    startLine?: number;
 	    endLine?: number;
 	    status: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new EditSummary(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.index = source["index"];
@@ -485,7 +485,7 @@ export namespace main {
 	        this.endLine = source["endLine"];
 	        this.status = source["status"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -511,11 +511,11 @@ export namespace main {
 	    renderDiagnostics?: string[];
 	    diagnostics?: string[];
 	    valid: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new FileEditState(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.edits = this.convertValues(source["edits"], EditSummary);
@@ -525,7 +525,7 @@ export namespace main {
 	        this.diagnostics = source["diagnostics"];
 	        this.valid = source["valid"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -556,11 +556,11 @@ export namespace main {
 	    currentPath?: string;
 	    canReconcile: boolean;
 	    reason?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ProgramCandidate(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ancestorId = source["ancestorId"];
@@ -605,11 +605,11 @@ export namespace main {
 	    importedSource?: string;
 	    importedName?: string;
 	    files?: explorer.File[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ProgramSnapshot(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -641,7 +641,7 @@ export namespace main {
 	        this.importedName = source["importedName"];
 	        this.files = this.convertValues(source["files"], explorer.File);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -668,11 +668,11 @@ export namespace main {
 	    date: string;
 	    author: string;
 	    subject: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new RevisionOption(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.kind = source["kind"];
@@ -688,18 +688,18 @@ export namespace main {
 	    branch: string;
 	    currentCommit: string;
 	    options: RevisionOption[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new RevisionContext(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.branch = source["branch"];
 	        this.currentCommit = source["currentCommit"];
 	        this.options = this.convertValues(source["options"], RevisionOption);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -722,18 +722,18 @@ export namespace main {
 }
 
 export namespace workspace {
-
+	
 	export class Edge {
 	    id: string;
 	    fromTileId: string;
 	    toTileId: string;
 	    kind: string;
 	    label: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Edge(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -747,11 +747,11 @@ export namespace workspace {
 	    edgeId: string;
 	    relationship: string;
 	    fromTileId: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new EdgeRef(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.edgeId = source["edgeId"];
@@ -762,11 +762,11 @@ export namespace workspace {
 	export class PaneState {
 	    overviewCollapsed: boolean;
 	    textCollapsed: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new PaneState(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.overviewCollapsed = source["overviewCollapsed"];
@@ -779,11 +779,11 @@ export namespace workspace {
 	    content?: string;
 	    sourceStartLine?: number;
 	    occurrences?: explorer.Occurrence[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new TextView(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.language = source["language"];
@@ -792,7 +792,7 @@ export namespace workspace {
 	        this.sourceStartLine = source["sourceStartLine"];
 	        this.occurrences = this.convertValues(source["occurrences"], explorer.Occurrence);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -822,11 +822,11 @@ export namespace workspace {
 	    imports?: explorer.ImportSummary[];
 	    references?: explorer.Reference[];
 	    selectedDeclaration?: explorer.Declaration;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Overview(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.kind = source["kind"];
@@ -840,7 +840,7 @@ export namespace workspace {
 	        this.references = this.convertValues(source["references"], explorer.Reference);
 	        this.selectedDeclaration = this.convertValues(source["selectedDeclaration"], explorer.Declaration);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -867,11 +867,11 @@ export namespace workspace {
 	    declarationName?: string;
 	    line?: number;
 	    endLine?: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Target(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.kind = source["kind"];
@@ -895,11 +895,11 @@ export namespace workspace {
 	    panes: PaneState;
 	    collapsed: boolean;
 	    canGoBack: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Tile(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -914,7 +914,7 @@ export namespace workspace {
 	        this.collapsed = source["collapsed"];
 	        this.canGoBack = source["canGoBack"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -938,11 +938,11 @@ export namespace workspace {
 	    title?: string;
 	    tiles: Tile[];
 	    edges?: Edge[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new InquiryRow(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -950,7 +950,7 @@ export namespace workspace {
 	        this.tiles = this.convertValues(source["tiles"], Tile);
 	        this.edges = this.convertValues(source["edges"], Edge);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -969,18 +969,18 @@ export namespace workspace {
 		    return a;
 		}
 	}
-
-
+	
+	
 	export class ProgramState {
 	    path: string;
 	    module?: string;
 	    packages?: explorer.Package[];
 	    localImports?: string[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ProgramState(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -988,7 +988,7 @@ export namespace workspace {
 	        this.packages = this.convertValues(source["packages"], explorer.Package);
 	        this.localImports = source["localImports"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1010,11 +1010,11 @@ export namespace workspace {
 	export class Selection {
 	    rowId?: string;
 	    tileId?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Selection(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.rowId = source["rowId"];
@@ -1026,11 +1026,11 @@ export namespace workspace {
 	    program?: ProgramState;
 	    rows: InquiryRow[];
 	    active: Selection;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new State(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.revision = source["revision"];
@@ -1038,7 +1038,7 @@ export namespace workspace {
 	        this.rows = this.convertValues(source["rows"], InquiryRow);
 	        this.active = this.convertValues(source["active"], Selection);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1057,7 +1057,8 @@ export namespace workspace {
 		    return a;
 		}
 	}
-
-
+	
+	
 
 }
+

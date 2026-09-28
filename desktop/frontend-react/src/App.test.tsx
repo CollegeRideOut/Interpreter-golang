@@ -122,12 +122,15 @@ describe('App', () => {
     render(<App providedEngine={fakeEngine({
       revision: 1,
       program: { path: '/tmp/example' },
-      rows: [{ id: 'row-1', title: 'Program inquiry', tiles: [{ id: 'tile-1', column: 0, target: { kind: 'program' }, overview: { kind: 'program', title: 'example', packages: [{ name: 'main', directory: '', fileCount: 1, files: [{ name: 'main.go', path: 'main.go' }] }] }, text: {}, panes: { overviewCollapsed: false, textCollapsed: false } }] }],
+      rows: [{ id: 'row-1', title: 'Program inquiry', tiles: [{ id: 'tile-1', column: 0, target: { kind: 'program' }, overview: { kind: 'program', title: 'example', packages: [{ name: 'main', directory: '', fileCount: 1, files: [{ name: 'main.go', path: 'main.go', declarations: [{ kind: 'function', name: 'main', line: 1, endLine: 3, exported: false }] }] }] }, text: {}, panes: { overviewCollapsed: false, textCollapsed: false } }] }],
       active: { rowId: 'row-1', tileId: 'tile-1' },
     })} />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Generate edits' }));
     expect(await screen.findAllByText('main.go')).not.toHaveLength(0);
+    expect(screen.getByText('Structural edits (1)')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'function main' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'function main' }));
   });
 
   it('renders cousin branches beneath one shared ancestor', async () => {

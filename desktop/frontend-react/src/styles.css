@@ -49,6 +49,12 @@ h1, h2, p { margin: 0; }.workspace-heading h1 { overflow: hidden; color: #f0eff7
 .comparison-tree-heading p { margin: 4px 0 0; color: #858ca6; font-size: 10px; }
 .comparison-scope { color: #858ca6; font-size: 11px; }
 .comparison-tree { display: grid; gap: 4px; margin-top: 8px; }
+.structural-edit-group + .structural-edit-group { margin-top: 14px; }
+.structural-edit-label { display: flex; align-items: center; gap: 5px; margin-bottom: 5px; color: #cfd3e1; font-size: 11px; font-weight: 700; }
+.structural-edit-toggle { width: 18px; padding: 0; border: 0; color: #858ca6; background: transparent; font: 14px monospace; }
+.structural-edit-open { padding: 0; border: 0; background: transparent; color: #cfd3e1; font: inherit; font-weight: 700; text-align: left; }
+.structural-edit-open:hover { color: #f0eff7; }
+.structural-edit-label span { margin-left: 8px; color: #858ca6; font: 10px monospace; font-weight: 400; }
 .comparison-tree-item { display: flex; align-items: center; min-height: 30px; gap: 8px; padding: 5px 8px; border-left: 1px solid #353b50; background: #1b1f2d; }
 .comparison-tree-context { color: #b8bdd0; }
 .comparison-tree-edit { border-color: #57506e; }

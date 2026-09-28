@@ -9,7 +9,7 @@ type PackageLens = 'files' | 'api';
 type FileLens = 'all' | 'exported' | 'internal';
 
 type ComparisonFile = { packageDirectory: string; packageName: string; path: string; edits: EditSummary[]; declaration?: Declaration };
-type EditInquiry = { id: string; title: string; columns: ComparisonFile[][] };
+type EditInquiry = { id: string; title: string; columns: ComparisonFile[][]; declaration?: Declaration };
 
 type ComparisonTreeNode = {
   id: string;
@@ -300,7 +300,7 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
           <label htmlFor="directory">Directory</label>
           <input id="directory" value={directory} onChange={(event) => setDirectory(event.target.value)} placeholder="/path/to/program" />
           <button type="button" onClick={exploreProgram} disabled={loading || directory.trim() === ''}>{loading ? 'Opening...' : 'Explore program'}</button>
-            {state && <p className="revision">Revision {state.revision} · {state.rows.length + editInquiries.length} {state.rows.length + editInquiries.length === 1 ? 'inquiry' : 'inquiries'}</p>}
+            {state && <p className="revision">Revision {state.revision} · {state.rows.length} {state.rows.length === 1 ? 'inquiry' : 'inquiries'}</p>}
           {error && <p className="error">{error}</p>}
         </div>
       </aside>
@@ -310,8 +310,7 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
         {state && <>
             <div className="workspace-heading"><div><p className="eyebrow">INQUIRY WORKSPACE</p><h1>{state.program?.path}</h1>{focus && <p className="focus-status">Highlighting {focus.kind === 'symbol' ? focus.name : focus.path}<button type="button" className="clear-focus" onClick={() => setFocus(null)}>Clear</button></p>}<RevisionControls context={revisionContext} current={currentRevision} compare={compareRevision} canGenerate={currentRevision !== compareRevision && compareRevision !== ''} onCurrentChange={selectCurrentRevision} onCompareChange={(revision) => { setCompareRevision(revision); setComparisonActive(false); setEditMap({}); }} onGenerate={generateEdits} /></div><button type="button" className="new-inquiry" onClick={startInquiry} disabled={loading}>+ New inquiry</button></div>
            <div className="inquiry-list">
-             {state.rows.map((row) => <InquiryRowView key={row.id} row={row} focus={focus} textRefs={textRefs} editsFor={editsFor} editsForPath={editsForPath} workingCodeForPath={workingCodeForPath} comparisonActive={comparisonActive} completeFileByTile={completeFileByTile} onCompleteFileChange={(tileID, value) => setCompleteFileByTile((current) => ({ ...current, [tileID]: value }))} onApplyEdit={changeComparisonEdit} onPackage={openPackage} onPackageColumn={openPackageColumn} onPackageLeft={openPackageLeft} onImport={openImport} onImportColumn={openImportColumn} onImportLeft={openImportLeft} onFile={openFile} onFileColumn={openFileColumn} onFileLeft={openFileLeft} onInspectFile={inspectFile} onInspectReference={inspectReference} onOpenReferenceLeft={openReferenceLeft} onOpenReferenceColumn={openReferenceColumn} onDeclaration={openDeclaration} onDeclarationColumn={openDeclarationColumn} onDeclarationLeft={openDeclarationLeft} onInspectDeclaration={inspectDeclaration} onLensChange={setLens} packageLens={packageLens} fileLens={fileLens} onTogglePane={togglePane} onToggleTile={toggleTile} onCloseColumn={closeColumn} onCloseTile={closeTile} onBack={goBack} />)}
-             {editInquiries.map((inquiry) => <EditInquiryView key={inquiry.id} inquiry={inquiry} onApplyEdit={changeComparisonEdit} />)}
+              {state.rows.map((row) => <InquiryRowView key={row.id} row={row} editInquiries={editInquiries} focus={focus} textRefs={textRefs} editsFor={editsFor} editsForPath={editsForPath} workingCodeForPath={workingCodeForPath} comparisonActive={comparisonActive} completeFileByTile={completeFileByTile} onCompleteFileChange={(tileID, value) => setCompleteFileByTile((current) => ({ ...current, [tileID]: value }))} onApplyEdit={changeComparisonEdit} onPackage={openPackage} onPackageColumn={openPackageColumn} onPackageLeft={openPackageLeft} onImport={openImport} onImportColumn={openImportColumn} onImportLeft={openImportLeft} onFile={openFile} onFileColumn={openFileColumn} onFileLeft={openFileLeft} onInspectFile={inspectFile} onInspectReference={inspectReference} onOpenReferenceLeft={openReferenceLeft} onOpenReferenceColumn={openReferenceColumn} onDeclaration={openDeclaration} onDeclarationColumn={openDeclarationColumn} onDeclarationLeft={openDeclarationLeft} onInspectDeclaration={inspectDeclaration} onLensChange={setLens} packageLens={packageLens} fileLens={fileLens} onTogglePane={togglePane} onToggleTile={toggleTile} onCloseColumn={closeColumn} onCloseTile={closeTile} onBack={goBack} />)}
           </div>
           <button type="button" className="bottom-inquiry" onClick={startInquiry} disabled={loading}>+ Start another inquiry at the bottom</button>
         </>}
@@ -351,6 +350,7 @@ export function buildEditInquiries(state: HeadlessState, editMap: Record<string,
     id: `${file.packageDirectory}:${file.packageName}:${file.path}:${file.declaration?.line ?? 'file'}:${index}`,
     title: file.declaration ? `${file.declaration.kind} ${file.declaration.name}` : file.path,
     columns: editColumns(file),
+    declaration: file.declaration,
   }));
 }
 
@@ -371,14 +371,6 @@ function editColumns(file: ComparisonFile): ComparisonFile[][] {
     const edits = file.edits.filter((edit) => edit.nodeGlobalId === child.id || edit.nodeId === child.id || edit.ancestorIds?.includes(child.id));
     return [{ ...file, edits }];
   }).filter((column) => column[0].edits.length > 0);
-}
-
-function EditInquiryView({ inquiry, onApplyEdit }: { inquiry: EditInquiry; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary) => void }) {
-  return <section className="inquiry-row"><div className="row-heading"><span>{inquiry.title}</span><span className="row-count">{inquiry.columns.length} column{inquiry.columns.length === 1 ? '' : 's'}</span></div><div className="tile-strip">{inquiry.columns.map((column, index) => {
-    const file = column[0];
-    const tile = { target: { kind: 'file', packagePath: file.packageDirectory, packageName: file.packageName, filePath: file.path } } as Tile;
-    return <article className="tile" key={`${inquiry.id}:${index}`}><div className="tile-meta"><span>Column {index + 1}</span></div><div className="tile-views"><section className="tile-view overview-view"><ComparisonTreeSection tile={tile} edits={file.edits} completeFile={false} onCompleteFileChange={() => undefined} onApplyEdit={onApplyEdit} /></section></div></article>;
-  })}</div></section>;
 }
 
 function RevisionControls({ context, current, compare, canGenerate, onCurrentChange, onCompareChange, onGenerate }: { context: RevisionContext | null; current: string; compare: string; canGenerate: boolean; onCurrentChange: (value: string) => void; onCompareChange: (value: string) => void; onGenerate: () => void }) {
@@ -463,6 +455,7 @@ export function buildComparisonTree(edits: EditSummary[]): ComparisonTreeNode[] 
 
 type RowProps = {
   row: InquiryRow;
+  editInquiries: EditInquiry[];
   editsFor: (tile: Tile) => EditSummary[];
   editsForPath: (packageDirectory: string, packageName: string, filePath: string) => EditSummary[];
   workingCodeForPath: (packageDirectory: string, packageName: string, filePath: string) => FileEditState | undefined;
@@ -499,7 +492,7 @@ type RowProps = {
   onBack: (row: InquiryRow, tile: Tile) => void;
 };
 
-function InquiryRowView({ row, focus, editsFor, editsForPath, workingCodeForPath, comparisonActive, completeFileByTile, onCompleteFileChange, onApplyEdit, textRefs, onPackage, onPackageColumn, onPackageLeft, onImport, onImportColumn, onImportLeft, onFile, onFileColumn, onFileLeft, onInspectFile, onInspectReference, onOpenReferenceLeft, onOpenReferenceColumn, onDeclaration, onDeclarationColumn, onDeclarationLeft, onInspectDeclaration, onLensChange, packageLens, fileLens, onTogglePane, onToggleTile, onCloseColumn, onCloseTile, onBack }: RowProps) {
+function InquiryRowView({ row, editInquiries, focus, editsFor, editsForPath, workingCodeForPath, comparisonActive, completeFileByTile, onCompleteFileChange, onApplyEdit, textRefs, onPackage, onPackageColumn, onPackageLeft, onImport, onImportColumn, onImportLeft, onFile, onFileColumn, onFileLeft, onInspectFile, onInspectReference, onOpenReferenceLeft, onOpenReferenceColumn, onDeclaration, onDeclarationColumn, onDeclarationLeft, onInspectDeclaration, onLensChange, packageLens, fileLens, onTogglePane, onToggleTile, onCloseColumn, onCloseTile, onBack }: RowProps) {
   return <section className="inquiry-row"><div className="row-heading"><span>{row.title ?? 'Inquiry'}</span><span className="row-count">{row.tiles.length} tile{row.tiles.length === 1 ? '' : 's'}</span></div><div className="tile-strip">
     {row.tiles.map((tile) => <article className="tile" key={tile.id}>
        <div className="tile-meta"><span>Column {tile.column + 1}</span><span className="tile-meta-actions">{tile.openedBy && <span className="relationship">{tile.openedBy.relationship}</span>}<button type="button" className="close-tile" onClick={() => onCloseTile(row, tile)} disabled={row.tiles.length === 1} aria-label={`Close column ${tile.column + 1}`}>Close</button><button type="button" className="close-tile" onClick={() => onBack(row, tile)} disabled={!tile.canGoBack}>Back</button><button type="button" className="close-tile" onClick={() => onToggleTile(row.id, tile)} aria-expanded={!tile.collapsed}>{tile.collapsed ? 'Open' : 'Collapse'}</button></span></div>
@@ -507,7 +500,7 @@ function InquiryRowView({ row, focus, editsFor, editsForPath, workingCodeForPath
       {!tile.collapsed && <div className="tile-views">
         <section className={`tile-view overview-view ${tile.panes.overviewCollapsed ? 'collapsed' : ''}`}>
           <button type="button" className="pane-heading" onClick={() => onTogglePane(row.id, tile, 'overview')}><span>Overview</span><span>{tile.panes.overviewCollapsed ? '+' : '−'}</span></button>
-            {!tile.panes.overviewCollapsed && <Overview tile={tile} row={row} edits={editsFor(tile)} comparisonActive={comparisonActive} completeFile={completeFileByTile[tile.id] === true} onCompleteFileChange={(value) => onCompleteFileChange(tile.id, value)} onApplyEdit={onApplyEdit} editsForPath={editsForPath} packageLens={packageLens(tile)} fileLens={fileLens(tile)} onLensChange={onLensChange} onPackage={onPackage} onPackageColumn={onPackageColumn} onPackageLeft={onPackageLeft} onImport={onImport} onImportColumn={onImportColumn} onImportLeft={onImportLeft} onFile={onFile} onFileColumn={onFileColumn} onFileLeft={onFileLeft} onInspectDeclaration={onInspectDeclaration} onDeclaration={onDeclaration} onDeclarationColumn={onDeclarationColumn} onDeclarationLeft={onDeclarationLeft} onInspectReference={onInspectReference} onOpenReferenceLeft={onOpenReferenceLeft} onOpenReferenceColumn={onOpenReferenceColumn} />}
+           {!tile.panes.overviewCollapsed && <Overview tile={tile} row={row} editInquiries={tile.target.kind === 'program' && row.title === 'Program inquiry' ? editInquiries : []} edits={editsFor(tile)} comparisonActive={comparisonActive} completeFile={completeFileByTile[tile.id] === true} onCompleteFileChange={(value) => onCompleteFileChange(tile.id, value)} onApplyEdit={onApplyEdit} editsForPath={editsForPath} packageLens={packageLens(tile)} fileLens={fileLens(tile)} onLensChange={onLensChange} onPackage={onPackage} onPackageColumn={onPackageColumn} onPackageLeft={onPackageLeft} onImport={onImport} onImportColumn={onImportColumn} onImportLeft={onImportLeft} onFile={onFile} onFileColumn={onFileColumn} onFileLeft={onFileLeft} onInspectDeclaration={onInspectDeclaration} onDeclaration={onDeclaration} onDeclarationColumn={onDeclarationColumn} onDeclarationLeft={onDeclarationLeft} onInspectReference={onInspectReference} onOpenReferenceLeft={onOpenReferenceLeft} onOpenReferenceColumn={onOpenReferenceColumn} />}
         </section>
         <section className={`tile-view text-view ${tile.panes.textCollapsed ? 'collapsed' : ''}`}>
           <button type="button" className="pane-heading" onClick={() => onTogglePane(row.id, tile, 'text')}><span>Text representation</span><span>{tile.panes.textCollapsed ? '+' : '−'}</span></button>
@@ -562,7 +555,7 @@ function highlightSource(line: string, occurrences: Occurrence[], sourceLine: nu
   return parts;
 }
 
-function Overview({ tile, row, edits, comparisonActive, completeFile, onCompleteFileChange, onApplyEdit, editsForPath, packageLens, fileLens, onLensChange, onPackage, onPackageColumn, onPackageLeft, onImport, onImportColumn, onImportLeft, onFile, onFileColumn, onFileLeft, onInspectDeclaration, onDeclaration, onDeclarationColumn, onDeclarationLeft, onInspectReference, onOpenReferenceLeft, onOpenReferenceColumn }: Omit<RowProps, 'onTogglePane' | 'onToggleTile' | 'onCloseColumn' | 'onCloseTile' | 'onBack' | 'focus' | 'textRefs' | 'onInspectFile' | 'onInspectReference' | 'onOpenReferenceLeft' | 'onOpenReferenceColumn' | 'editsFor' | 'editsForPath' | 'packageLens' | 'fileLens' | 'comparisonActive' | 'completeFileByTile' | 'onCompleteFileChange' | 'comparisonRows' | 'onApplyEdit'> & { tile: Tile; edits: EditSummary[]; comparisonActive: boolean; completeFile: boolean; onCompleteFileChange: (value: boolean) => void; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary) => void; editsForPath: (packageDirectory: string, packageName: string, filePath: string) => EditSummary[]; packageLens: PackageLens; fileLens: FileLens; onInspectReference: (row: InquiryRow, tile: Tile, reference: Reference) => void; onOpenReferenceLeft: (row: InquiryRow, tile: Tile, reference: Reference) => void; onOpenReferenceColumn: (row: InquiryRow, tile: Tile, reference: Reference) => void }) {
+function Overview({ tile, row, editInquiries, edits, comparisonActive, completeFile, onCompleteFileChange, onApplyEdit, editsForPath, packageLens, fileLens, onLensChange, onPackage, onPackageColumn, onPackageLeft, onImport, onImportColumn, onImportLeft, onFile, onFileColumn, onFileLeft, onInspectDeclaration, onDeclaration, onDeclarationColumn, onDeclarationLeft, onInspectReference, onOpenReferenceLeft, onOpenReferenceColumn }: Omit<RowProps, 'onTogglePane' | 'onToggleTile' | 'onCloseColumn' | 'onCloseTile' | 'onBack' | 'focus' | 'textRefs' | 'onInspectFile' | 'onInspectReference' | 'onOpenReferenceLeft' | 'onOpenReferenceColumn' | 'editsFor' | 'editsForPath' | 'packageLens' | 'fileLens' | 'comparisonActive' | 'completeFileByTile' | 'onCompleteFileChange' | 'comparisonRows' | 'onApplyEdit' | 'editInquiries'> & { tile: Tile; editInquiries: EditInquiry[]; edits: EditSummary[]; comparisonActive: boolean; completeFile: boolean; onCompleteFileChange: (value: boolean) => void; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary) => void; editsForPath: (packageDirectory: string, packageName: string, filePath: string) => EditSummary[]; packageLens: PackageLens; fileLens: FileLens; onInspectReference: (row: InquiryRow, tile: Tile, reference: Reference) => void; onOpenReferenceLeft: (row: InquiryRow, tile: Tile, reference: Reference) => void; onOpenReferenceColumn: (row: InquiryRow, tile: Tile, reference: Reference) => void }) {
   const overview = tile.overview;
   const [showReferences, setShowReferences] = useState(false);
   const declarationsFor = (file: File): Declaration[] => file.declarations ?? [];
@@ -585,6 +578,7 @@ function Overview({ tile, row, edits, comparisonActive, completeFile, onComplete
      {tile.target.kind === 'file' && <LensControls value={fileLens} options={[['all', 'All'], ['exported', 'Exported'], ['internal', 'Internal']]} onChange={(value) => onLensChange(tile, value as FileLens)} />}
      {tile.target.kind === 'package' && <ChangedFilesSection tile={tile} row={row} editsForPath={editsForPath} onFile={onFile} onFileLeft={onFileLeft} onFileColumn={onFileColumn} />}
      {overview.packages?.map((pkg) => <TargetButton key={`${pkg.directory}:${pkg.name}`} label={`package ${pkg.name}`} detail={`${pkg.directory || 'root package'} · ${pkg.fileCount} files`} canOpenLeft={tile.column > 0} onOpen={() => onPackage(row, tile, pkg)} onOpenLeft={() => onPackageLeft(row, tile, pkg)} onOpenColumn={() => onPackageColumn(row, tile, pkg)} />)}
+     {tile.target.kind === 'program' && editInquiries.length > 0 && <StructuralEditsSection inquiries={editInquiries} onApplyEdit={onApplyEdit} onOpenDeclaration={(file, declaration) => onDeclarationColumn(row, tile, file, declaration)} />}
      {tile.target.kind === 'package' && packageLens === 'files' && overview.files?.map((file) => <TargetButton key={file.path} label={file.name} detail={file.path} canOpenLeft={tile.column > 0} onOpen={() => onFile(row, tile, file)} onOpenLeft={() => onFileLeft(row, tile, file)} onOpenColumn={() => onFileColumn(row, tile, file)} />)}
       {tile.target.kind === 'package' && packageLens === 'api' && overview.files?.flatMap((file) => packageApiRows(file).map(({ declaration, child }) => <TargetButton key={`${file.path}:${declaration.symbolId ?? declaration.name}:${declaration.line}`} label={`${child ? '↳ ' : ''}${declaration.kind} ${declaration.name}`} detail={`${file.name} · ${declarationSignature(declaration)} · line ${declaration.line}`} canOpenLeft={tile.column > 0} onOpen={() => onInspectDeclaration(row, tile, file.path, declaration)} onOpenLeft={() => onDeclarationLeft(row, tile, file.path, declaration)} onOpenColumn={() => onDeclarationColumn(row, tile, file.path, declaration)} />))}
     {overview.importPaths && overview.importPaths.length > 0 && <section className="overview-section"><h3>Imports</h3>{overview.importPaths.map((path) => {
@@ -601,6 +595,18 @@ function Overview({ tile, row, edits, comparisonActive, completeFile, onComplete
        {(tile.target.kind === 'declaration' || overview.selectedDeclaration) && (overview.references?.length ?? 0) > 0 && <section className="overview-section references-section"><h3>{overview.selectedDeclaration ? `${overview.selectedDeclaration.kind} ${overview.selectedDeclaration.name}` : 'References'}</h3><button type="button" className="section-toggle" onClick={() => setShowReferences((visible) => !visible)}>{showReferences ? 'Hide references' : `Find references (${overview.references?.length})`}</button>{showReferences && overview.references?.map((reference) => <ReferenceButton key={`${reference.filePath}:${reference.referenceLine ?? reference.line}`} reference={reference} canOpenLeft={tile.column > 0} onOpen={() => onInspectReference(row, tile, reference)} onOpenLeft={() => onOpenReferenceLeft(row, tile, reference)} onOpenColumn={() => onOpenReferenceColumn(row, tile, reference)} />)}</section>}
        {comparisonActive && (tile.target.kind === 'file' || tile.target.kind === 'declaration') ? <ComparisonTreeSection tile={tile} edits={edits} completeFile={completeFile} onCompleteFileChange={onCompleteFileChange} onApplyEdit={onApplyEdit} /> : editsForDeclaration(edits, editDeclaration).length > 0 && <EditSection edits={editsForDeclaration(edits, editDeclaration)} />}
     </div>;
+}
+
+function StructuralEditsSection({ inquiries, onApplyEdit, onOpenDeclaration }: { inquiries: EditInquiry[]; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary) => void; onOpenDeclaration: (file: string, declaration: Declaration) => void }) {
+  const editCount = inquiries.reduce((count, inquiry) => count + inquiry.columns.reduce((columnCount, column) => columnCount + column[0].edits.length, 0), 0);
+  return <section className="overview-section edit-section comparison-results structural-edits"><div className="comparison-tree-heading"><div><h3>Structural edits ({editCount})</h3><p>Revision changes in the Program inquiry.</p></div><span className="comparison-scope">Tree</span></div><div className="comparison-tree">{inquiries.flatMap((inquiry) => inquiry.columns.map((column, index) => <StructuralEditGroup key={`${inquiry.id}:${index}`} inquiry={inquiry} file={column[0]} index={index} onApplyEdit={onApplyEdit} onOpenDeclaration={onOpenDeclaration} />))}</div></section>;
+}
+
+function StructuralEditGroup({ inquiry, file, index, onApplyEdit, onOpenDeclaration }: { inquiry: EditInquiry; file: ComparisonFile; index: number; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary) => void; onOpenDeclaration: (file: string, declaration: Declaration) => void }) {
+  const [expanded, setExpanded] = useState(Boolean(inquiry.declaration));
+  const tree = buildComparisonTree(file.edits);
+  const label = `${inquiry.title}${inquiry.columns.length > 1 ? ` · branch ${index + 1}` : ''}`;
+  return <div className="structural-edit-group"><div className="structural-edit-label"><button type="button" className="structural-edit-toggle" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>{expanded ? '−' : '+'}</button>{inquiry.declaration ? <button type="button" className="structural-edit-open" onClick={() => onOpenDeclaration(file.path, inquiry.declaration)}>{label}</button> : <span>{label}</span>}<span>{file.path}</span></div>{expanded && tree.map((node) => <ComparisonTreeNodeView key={`${inquiry.id}:${index}:${node.id}`} node={node} depth={0} packageDirectory={file.packageDirectory} packageName={file.packageName} file={file.path} onApplyEdit={onApplyEdit} />)}</div>;
 }
 
 function ComparisonTreeSection({ tile, edits, completeFile, onCompleteFileChange, onApplyEdit }: { tile: Tile; edits: EditSummary[]; completeFile: boolean; onCompleteFileChange: (value: boolean) => void; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary) => void }) {

@@ -30,11 +30,11 @@ function fakeEngine(initialState?: HeadlessState, fileEdits: EditSummary[] = [{ 
     back: result,
     inspectFile: result,
     inspectDeclaration: result,
-    openFile: async (_rowID, _tileID, _packageDirectory, _packageName, filePath) => {
+    openFile: result,
+    navigateFile: async (_rowID, _tileID, _packageDirectory, _packageName, filePath) => {
       onOpenFile?.(filePath);
       return result();
     },
-    navigateFile: result,
     openDeclaration: async (_rowID, _tileID, _packageDirectory, _packageName, _filePath, name) => {
       return result();
     },

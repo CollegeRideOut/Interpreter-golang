@@ -84,7 +84,7 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
       if (!file || !row || !tile) return;
       comparisonOpenKey.current = openKey;
       try {
-        const nextState = await engine.openFile(row.id, tile.id, file.packageDirectory, file.packageName, file.path);
+        const nextState = await engine.navigateFile(row.id, tile.id, file.packageDirectory, file.packageName, file.path);
         setState(nextState);
       } catch (reason) {
         comparisonOpenKey.current = null;

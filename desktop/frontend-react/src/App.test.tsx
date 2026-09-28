@@ -162,6 +162,34 @@ describe('App', () => {
     expect(tree[0].children.map((node) => node.id)).toEqual(['lhs', 'rhs']);
   });
 
+  it('scopes declaration trees to descendants and excludes file parents', () => {
+    const declaration = { kind: 'function', name: 'main', line: 3, endLine: 8, exported: false };
+    const tree = buildComparisonTree([
+      { index: 0, kind: 'UPDATE', nodeId: 'file', nodeKind: '*ast.File', position: 0, startLine: 1, endLine: 10 },
+      { index: 1, kind: 'UPDATE', nodeId: 'body', nodeKind: '*ast.BlockStmt', position: 1, startLine: 3, endLine: 8, ancestors: [{ nodeId: 'file', nodeKind: '*ast.File', startLine: 1, endLine: 10 }] },
+    ].filter((edit) => edit.startLine !== 1), declaration);
+
+    expect(tree.map((node) => node.id)).toEqual(['body']);
+  });
+
+  it('renders declaration inquiries with declaration-only source and edits', async () => {
+    render(<App providedEngine={fakeEngine({
+      revision: 1,
+      program: { path: '/tmp/example' },
+      rows: [{ id: 'row-1', title: 'Program inquiry', tiles: [{ id: 'tile-1', column: 0, target: { kind: 'declaration', packageName: 'main', packagePath: '', filePath: 'main.go', declarationName: 'main', line: 3 }, overview: { kind: 'declaration', title: 'main', subtitle: 'function', declarations: [{ kind: 'function', name: 'main', line: 3, endLine: 8, exported: false }], references: [] }, text: { content: 'func main() {\n\twork()\n}', sourceStartLine: 3 }, panes: { overviewCollapsed: false, textCollapsed: false } }] }],
+      active: { rowId: 'row-1', tileId: 'tile-1' },
+    }, [
+      { index: 0, kind: 'UPDATE', nodeId: 'file', nodeKind: '*ast.File', position: 0, startLine: 1, endLine: 10 },
+      { index: 1, kind: 'UPDATE', nodeId: 'body', nodeKind: '*ast.BlockStmt', position: 1, startLine: 3, endLine: 8, ancestors: [{ nodeId: 'file', nodeKind: '*ast.File', startLine: 1, endLine: 10 }] },
+    ])} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate edits' }));
+    expect(await screen.findByText('Compared edits (1)')).toBeInTheDocument();
+    expect(screen.getByText('Edits inside function main.')).toBeInTheDocument();
+    expect(screen.getByText('func main() {')).toBeInTheDocument();
+    expect(screen.queryByText('package main')).not.toBeInTheDocument();
+  });
+
   it('merges source and target paths for one assignment by global identity', () => {
     const tree = buildComparisonTree([
       {

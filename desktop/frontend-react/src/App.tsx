@@ -183,7 +183,10 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
     setComparisonActive(false);
     setEditMap({});
     setOpenedComparisonFiles({});
-    if (state?.program?.path) update(() => engine.selectRevision(state.program.path, revision));
+    // Current is the comparison baseline. Keep the visible explorer on the
+    // compare-to revision while the diff inputs are being changed.
+    const activeRevision = compareRevision || revision;
+    if (state?.program?.path) update(() => engine.selectRevision(state.program.path, activeRevision));
   }
 
   function selectCompareRevision(revision: string) {
@@ -701,7 +704,8 @@ function InquiryRowView({ row, editInquiries, comparisonPreview, formatRequests,
 }
 
 function TextRepresentation({ tile, focus, textRefs, editState, formatRequest }: { tile: Tile; focus: FocusTarget | null; textRefs: React.MutableRefObject<Record<string, HTMLPreElement | null>>; editState?: FileEditState; formatRequest: number }) {
-  const rawContent = tile.target.kind === 'declaration' ? declarationContent(tile, editState) : editState ? editState.workingCode : tile.text.content;
+  const projectedEditState = editState && (hasProjectedEdits(editState) || !tile.text.content) ? editState : undefined;
+  const rawContent = tile.target.kind === 'declaration' ? declarationContent(tile, projectedEditState) : projectedEditState ? projectedEditState.workingCode : tile.text.content;
   const [content, setContent] = useState(rawContent);
   const [formatError, setFormatError] = useState('');
   useEffect(() => {
@@ -774,7 +778,7 @@ function addReadableTypeScriptSpacing(source: string): string {
 
 function declarationContent(tile: Tile, editState?: FileEditState): string | undefined {
   const declaration = tile.overview.declarations?.[0];
-  const source = editState ? editState.workingCode : tile.text.content;
+  const source = editState && (hasProjectedEdits(editState) || !tile.text.content) ? editState.workingCode : tile.text.content;
   if (!declaration || !source) return source;
   const lines = source.split('\n');
   const start = declarationStartLine(lines, declaration);
@@ -792,6 +796,10 @@ function declarationContent(tile: Tile, editState?: FileEditState): string | und
     if (opened && depth <= 0) return lines.slice(start, index + 1).join('\n');
   }
   return lines.slice(start, declaration.endLine).join('\n');
+}
+
+function hasProjectedEdits(editState: FileEditState): boolean {
+  return editState.edits.some((edit) => edit.status === 'applied' || edit.status === 'prepared' || edit.status === 'removed');
 }
 
 function declarationStartLine(lines: string[], declaration: Declaration): number {

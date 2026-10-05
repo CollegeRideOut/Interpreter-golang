@@ -31,7 +31,7 @@ function fakeEngine(initialState?: HeadlessState, fileEdits: EditSummary[] = [{ 
     removeFileEditSubtree: async () => fileEditState('removed'),
     openComparisonFile: async (_directory, _currentRevision, _compareRevision, packageDirectory, packageName, filePath) => {
       const tileID = 'comparison-tile';
-      state = { ...state, rows: [...state.rows, { id: 'comparison-row', title: filePath, tiles: [{ id: tileID, column: 0, target: { kind: 'file', packagePath: packageDirectory, packageName, filePath }, overview: { kind: 'file', title: filePath, declarations: [] }, text: {}, panes: { overviewCollapsed: false, textCollapsed: false } }] }], active: { rowId: 'comparison-row', tileId: tileID } };
+      state = { ...state, rows: [...state.rows, { id: 'comparison-row', title: filePath, tiles: [{ id: tileID, column: 0, target: { kind: 'file', packagePath: packageDirectory, packageName, filePath }, overview: { kind: 'file', title: filePath, declarations: [] }, text: { content: workingCode }, panes: { overviewCollapsed: false, textCollapsed: false } }] }], active: { rowId: 'comparison-row', tileId: tileID } };
       return state;
     },
     startInquiry: async () => {

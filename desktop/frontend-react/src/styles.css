@@ -119,3 +119,5 @@ h1, h2, p { margin: 0; }.workspace-heading h1 { overflow: hidden; color: #f0eff7
 .format-button { margin-left: 10px; padding: 4px 8px; border: 1px solid #57506e; border-radius: 5px; background: transparent; color: #d1a0ff; font-size: 10px; }
 .format-button:hover { border-color: #b36aff; color: #f0eff7; }
 .source-line.edit-location { background: rgba(179, 106, 255, .1); box-shadow: inset 3px 0 #8c5ad0; }
+.target-choice.has-edits .target-button { border-color: #b36aff; background: #241b35; }
+.target-edit-marker { display: block; margin-top: 5px; color: #d1a0ff; font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }

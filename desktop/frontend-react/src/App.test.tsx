@@ -163,6 +163,7 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Generate edits' }));
     expect(await screen.findAllByText('main.go')).not.toHaveLength(0);
     expect(screen.getByText('Structural edits (1)')).toBeInTheDocument();
+    expect(screen.getByText('AST edits below')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'function main' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Format' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open source' })).toBeInTheDocument();

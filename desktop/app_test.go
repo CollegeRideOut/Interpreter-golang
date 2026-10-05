@@ -152,6 +152,24 @@ func TestComparisonFileEditsCanBeAppliedAndRemoved(t *testing.T) {
 	}
 }
 
+func TestOpenComparisonFileUsesDiffBaselineSource(t *testing.T) {
+	app := NewApp()
+	if _, err := app.OpenProgram("../TestProgram"); err != nil {
+		t.Fatal(err)
+	}
+	state, err := app.OpenComparisonFile("../TestProgram", "working-tree", "aaf2399", "", "main", "main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := os.ReadFile(filepath.Join("..", "TestProgram", "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Rows) != 2 || state.Rows[1].Tiles[0].Text.Content != string(current) {
+		t.Fatalf("opened comparison source did not use the diff baseline")
+	}
+}
+
 func TestProgramComparisonDiscoversChangedFiles(t *testing.T) {
 	app := NewApp()
 	if _, err := app.OpenProgram("../TestProgram"); err != nil {

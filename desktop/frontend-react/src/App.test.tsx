@@ -151,21 +151,6 @@ describe('App', () => {
     expect((await screen.findAllByRole('button', { name: 'Remove' })).length).toBeGreaterThan(0);
   });
 
-  it('marks edits as applied while viewing Compare to', async () => {
-    render(<App providedEngine={fakeEngine({
-      revision: 1,
-      program: { path: '/tmp/example' },
-      rows: [{ id: 'row-1', title: 'Program inquiry', tiles: [{ id: 'tile-1', column: 0, target: { kind: 'file', packageName: 'main', filePath: 'main.go' }, overview: { kind: 'file', title: 'main.go' }, text: {}, panes: { overviewCollapsed: false, textCollapsed: false } }] }],
-      active: { rowId: 'row-1', tileId: 'tile-1' },
-    })} />);
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Generate edits' }));
-    expect(await screen.findAllByRole('button', { name: 'Apply' })).not.toHaveLength(0);
-    fireEvent.change(screen.getByLabelText('Compare to'), { target: { value: 'abc1234' } });
-    fireEvent.click(await screen.findByRole('button', { name: 'Generate edits' }));
-    expect(await screen.findAllByRole('button', { name: 'Remove' })).not.toHaveLength(0);
-  });
-
   it('shows comparison results from the program explorer tile', async () => {
     let openedFile = '';
     render(<App providedEngine={fakeEngine({
@@ -180,9 +165,10 @@ describe('App', () => {
     expect(screen.getByText('Structural edits (1)')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'function main' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Format' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open in new inquiry' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open source' })).toBeInTheDocument();
+    expect(document.querySelectorAll('.edit-location').length).toBeGreaterThan(0);
     await waitFor(() => expect(screen.getAllByText('package main').length).toBeGreaterThan(1));
-    fireEvent.click(screen.getByRole('button', { name: 'Open in new inquiry' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open source' }));
     expect(await screen.findAllByText('main.go')).toHaveLength(2);
     expect(screen.queryByText('Structural edits (1)')).not.toBeInTheDocument();
     expect(openedFile).toBe('');

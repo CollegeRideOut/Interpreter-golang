@@ -741,8 +741,8 @@ func (a *App) StartInquiry(title string) (headless.State, error) {
 }
 
 // OpenComparisonFile starts a new inquiry for a file that may only exist in
-// one side of the selected revision comparison. The compare-to revision is
-// the active workspace snapshot, so the opened file shows the version being edited.
+// one side of the selected revision comparison. The diff baseline is the
+// source shown to the user; compare-to is only a fallback for missing files.
 func (a *App) OpenComparisonFile(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string) (headless.State, error) {
 	absolute, err := filepath.Abs(directory)
 	if err != nil {
@@ -756,9 +756,15 @@ func (a *App) OpenComparisonFile(directory, currentRevision, compareRevision, pa
 		if comparisonFile.PackageDirectory != packageDirectory || comparisonFile.PackageName != packageName || comparisonFile.File.Path != filePath {
 			continue
 		}
-		source, _, err := revisionFileBytesOptional(absolute, compareRevision, filePath)
+		source, exists, err := revisionFileBytesOptional(absolute, currentRevision, filePath)
 		if err != nil {
 			return headless.State{}, err
+		}
+		if !exists {
+			source, _, err = revisionFileBytesOptional(absolute, compareRevision, filePath)
+			if err != nil {
+				return headless.State{}, err
+			}
 		}
 		return a.headlessWorkspace().OpenComparisonFile(filePath, packageDirectory, packageName, comparisonFile.File, string(source))
 	}

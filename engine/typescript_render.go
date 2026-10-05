@@ -21,7 +21,7 @@ func collectTypeScriptTokens(node *structuralASTNode, tokens *[]string) {
 	for _, child := range node.Children {
 		collectTypeScriptTokens(child, tokens)
 	}
-	if isTypeScriptStatementNode(node.Kind) {
+	if isTypeScriptStatementNode(node.Kind) || isTypeScriptInterfaceMember(node) {
 		*tokens = append(*tokens, typeScriptStatementBoundary)
 	}
 }
@@ -67,6 +67,12 @@ func formatTypeScriptTokens(tokens []string) string {
 				flush()
 			}
 		case ";":
+			if strings.TrimSpace(line) == "" && len(lines) > 0 {
+				if !strings.HasSuffix(strings.TrimRight(lines[len(lines)-1], " "), ";") {
+					lines[len(lines)-1] = strings.TrimRight(lines[len(lines)-1], " ") + ";"
+				}
+				break
+			}
 			line = strings.TrimRight(line, " ") + ";"
 			if parenDepth == 0 {
 				flush()
@@ -208,6 +214,18 @@ func isTypeScriptStatementNode(kind string) bool {
 		":export_statement",
 	} {
 		if strings.HasSuffix(kind, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func isTypeScriptInterfaceMember(node *structuralASTNode) bool {
+	if node == nil || (!strings.HasSuffix(node.Kind, ":property_signature") && !strings.HasSuffix(node.Kind, ":method_signature")) {
+		return false
+	}
+	for parent := node.parent; parent != nil; parent = parent.parent {
+		if strings.HasSuffix(parent.Kind, ":interface_body") {
 			return true
 		}
 	}

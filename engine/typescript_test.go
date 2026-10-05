@@ -182,6 +182,26 @@ func TestTypeScriptDiffIncludesInsertedDeclaration(t *testing.T) {
 	}
 }
 
+func TestTypeScriptAppliedInterfacePropertiesRemainSeparated(t *testing.T) {
+	source := []byte("interface Schema {\n  health: { id: number };\n}\n")
+	target := []byte("interface Schema {\n  health: { id: number };\n  books: {\n    id: Generated<number>;\n    author: string;\n    title: string;\n    path: string;\n  };\n}\n")
+	state, err := engine.NewWorkingStateFromLanguage("typescript", source, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range state.Snapshot().Edits {
+		if err := state.Apply(index); err != nil {
+			t.Fatalf("apply edit %d: %v", index, err)
+		}
+	}
+	if report := state.Validate(); !report.Valid {
+		t.Fatalf("applied interface properties are invalid: %v\n%s", report.Diagnostics, state.Snapshot().RenderedCode)
+	}
+	if got := state.Snapshot().RenderedCode; !strings.Contains(got, "Generated<number>;\n    author: string;") {
+		t.Fatalf("interface properties were not separated:\n%s", got)
+	}
+}
+
 func TestValidateTypeScriptWorkingState(t *testing.T) {
 	state, err := engine.NewWorkingStateFromTypeScript(
 		[]byte("const value = 1;\n"),

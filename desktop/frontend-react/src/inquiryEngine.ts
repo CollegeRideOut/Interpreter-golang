@@ -174,6 +174,8 @@ export type FileEditState = {
   edits: EditSummary[];
   liftedEdits?: EditSummary[];
   workingCode: string;
+  targetCode?: string;
+  targetDiagnostics?: string[];
   renderDiagnostics?: string[];
   diagnostics?: string[];
   valid: boolean;

@@ -120,6 +120,8 @@ type FileEditState struct {
 	Edits             []EditSummary `json:"edits"`
 	LiftedEdits       []EditSummary `json:"liftedEdits,omitempty"`
 	WorkingCode       string        `json:"workingCode"`
+	TargetCode        string        `json:"targetCode,omitempty"`
+	TargetDiagnostics []string      `json:"targetDiagnostics,omitempty"`
 	RenderDiagnostics []string      `json:"renderDiagnostics,omitempty"`
 	Diagnostics       []string      `json:"diagnostics,omitempty"`
 	Valid             bool          `json:"valid"`
@@ -502,6 +504,7 @@ func revisionFileBytesOptional(directory, revision, filePath string) ([]byte, bo
 
 func summarizeComparisonState(state *engine.WorkingState) FileEditState {
 	snapshot := state.Snapshot()
+	target := state.TargetCode()
 	validation := state.Validate()
 	views := engine.ProjectEdits(snapshot.Edits, liftOptions(defaultHiddenKinds()))
 	summarize := func(index int) EditSummary {
@@ -524,7 +527,7 @@ func summarizeComparisonState(state *engine.WorkingState) FileEditState {
 	for _, view := range views {
 		lifted = append(lifted, summarize(view.EditIndex))
 	}
-	return FileEditState{Edits: all, LiftedEdits: lifted, WorkingCode: snapshot.RenderedCode, RenderDiagnostics: snapshot.RenderDiagnostics, Diagnostics: validation.Diagnostics, Valid: validation.Valid}
+	return FileEditState{Edits: all, LiftedEdits: lifted, WorkingCode: snapshot.RenderedCode, TargetCode: target.Code, TargetDiagnostics: target.Diagnostics, RenderDiagnostics: snapshot.RenderDiagnostics, Diagnostics: validation.Diagnostics, Valid: validation.Valid}
 }
 
 func (a *App) ApplyFileEdit(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string, index int) (FileEditState, error) {

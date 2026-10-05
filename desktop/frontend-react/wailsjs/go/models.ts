@@ -548,6 +548,8 @@ export namespace main {
 	    edits: EditSummary[];
 	    liftedEdits?: EditSummary[];
 	    workingCode: string;
+	    targetCode?: string;
+	    targetDiagnostics?: string[];
 	    renderDiagnostics?: string[];
 	    diagnostics?: string[];
 	    valid: boolean;
@@ -561,6 +563,8 @@ export namespace main {
 	        this.edits = this.convertValues(source["edits"], EditSummary);
 	        this.liftedEdits = this.convertValues(source["liftedEdits"], EditSummary);
 	        this.workingCode = source["workingCode"];
+	        this.targetCode = source["targetCode"];
+	        this.targetDiagnostics = source["targetDiagnostics"];
 	        this.renderDiagnostics = source["renderDiagnostics"];
 	        this.diagnostics = source["diagnostics"];
 	        this.valid = source["valid"];

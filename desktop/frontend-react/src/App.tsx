@@ -41,6 +41,7 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
   const [compareRevision, setCompareRevision] = useState('');
   const [workspaceRevision, setWorkspaceRevision] = useState('working-tree');
   const [editMap, setEditMap] = useState<Record<string, FileEditState>>({});
+  const [projectedFiles, setProjectedFiles] = useState<Record<string, string>>({});
   const [comparisonActive, setComparisonActive] = useState(false);
   const [completeFileByTile, setCompleteFileByTile] = useState<Record<string, boolean>>({});
   const [engine] = useState<InquiryEngine>(() => providedEngine ?? createWailsEngine());
@@ -53,8 +54,32 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
   const [openedComparisonFiles, setOpenedComparisonFiles] = useState<Record<string, boolean>>({});
   const [formatRequests, setFormatRequests] = useState<Record<string, number>>({});
   const comparisonPreview = comparisonActive
-    ? Object.values(editMap).find((editState) => editState.workingCode.trim() !== '') ?? Object.values(editMap)[0]
+    ? Object.entries(displayEditMap()).map(([, editState]) => editState).find((editState) => editState.workingCode.trim() !== '') ?? Object.values(displayEditMap())[0]
     : undefined;
+
+  function comparisonPair() {
+    return `${currentRevision}:${compareRevision}`;
+  }
+
+  function isProjected(key: string) {
+    return projectedFiles[key] === comparisonPair();
+  }
+
+  function displayEditState(key: string, editState: FileEditState): FileEditState {
+    if (workspaceRevision !== compareRevision || isProjected(key)) return editState;
+    const applied = (edit: EditSummary): EditSummary => ({ ...edit, status: edit.status === 'removed' ? 'removed' : 'applied' });
+    return {
+      ...editState,
+      edits: editState.edits.map(applied),
+      liftedEdits: editState.liftedEdits?.map(applied),
+      workingCode: editState.targetCode ?? editState.workingCode,
+      renderDiagnostics: editState.targetDiagnostics ?? [],
+    };
+  }
+
+  function displayEditMap() {
+    return Object.fromEntries(Object.entries(editMap).map(([key, value]) => [key, displayEditState(key, value)]));
+  }
 
   useEffect(() => {
     engine.getCurrentState().then(setState).catch(() => undefined);
@@ -185,11 +210,8 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
     setComparisonActive(false);
     setEditMap({});
     setOpenedComparisonFiles({});
-    // Current is the comparison baseline. Keep the visible explorer on the
-    // compare-to revision while the diff inputs are being changed.
-    const activeRevision = compareRevision || revision;
-    setWorkspaceRevision(activeRevision);
-    if (state?.program?.path) update(() => engine.selectRevision(state.program.path, activeRevision));
+    setWorkspaceRevision(revision);
+    if (state?.program?.path) update(() => engine.selectRevision(state.program.path, revision));
   }
 
   function selectCompareRevision(revision: string) {
@@ -202,24 +224,10 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
     if (state?.program?.path) update(() => engine.selectRevision(state.program.path, revision));
   }
 
-  async function generateEdits() {
+  function generateEdits() {
     setError('');
-    setEditMap({});
     setOpenedComparisonFiles({});
     comparisonOpenKey.current = null;
-
-    if (state?.program?.path && compareRevision && workspaceRevision !== compareRevision) {
-      setLoading(true);
-      try {
-        setState(await engine.selectRevision(state.program.path, compareRevision));
-        setWorkspaceRevision(compareRevision);
-      } catch (reason) {
-        setError(reason instanceof Error ? reason.message : 'Unable to load the workspace revision.');
-        return;
-      } finally {
-        setLoading(false);
-      }
-    }
     setComparisonActive(true);
   }
 
@@ -374,11 +382,15 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
   }
 
   function editsForPath(packageDirectory: string, packageName: string, filePath: string): EditSummary[] {
-    return editMap[`${packageDirectory}:${packageName}:${filePath}`]?.edits ?? [];
+    const key = `${packageDirectory}:${packageName}:${filePath}`;
+    const editState = editMap[key];
+    return editState ? displayEditState(key, editState).edits : [];
   }
 
   function workingCodeForPath(packageDirectory: string, packageName: string, filePath: string): FileEditState | undefined {
-    return editMap[`${packageDirectory}:${packageName}:${filePath}`];
+    const key = `${packageDirectory}:${packageName}:${filePath}`;
+    const editState = editMap[key];
+    return editState ? displayEditState(key, editState) : undefined;
   }
 
   async function changeComparisonEdit(packageDirectory: string, packageName: string, file: string, edit: EditSummary, fullLine = false) {
@@ -393,6 +405,7 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
       const key = `${packageDirectory}:${packageName}:${file}`;
       const nextMap = { ...editMap, [key]: fileState };
       setEditMap(nextMap);
+      setProjectedFiles((current) => ({ ...current, [key]: comparisonPair() }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to update the edit.');
     } finally {
@@ -401,7 +414,7 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
   }
 
   const editInquiries = comparisonActive && state
-    ? buildEditInquiries(state, editMap).filter((inquiry) => {
+    ? buildEditInquiries(state, displayEditMap()).filter((inquiry) => {
       const file = inquiry.columns[0]?.[0];
       return !file || !openedComparisonFiles[`${file.packageDirectory}:${file.packageName}:${file.path}`];
     })
@@ -425,7 +438,7 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
       <section className="workspace" aria-label="Contuts inquiry workspace">
         {!state && <div className="welcome"><h1>Contuts hello</h1><p>Open a program to begin an inquiry.</p></div>}
         {state && <>
-             <div className="workspace-heading"><div><p className="eyebrow">INQUIRY WORKSPACE</p><h1>{state.program?.path}</h1>{focus && <p className="focus-status">Highlighting {focus.kind === 'symbol' ? focus.name : focus.path}<button type="button" className="clear-focus" onClick={() => setFocus(null)}>Clear</button></p>}<RevisionControls context={revisionContext} current={currentRevision} compare={compareRevision} canGenerate={currentRevision !== compareRevision && compareRevision !== ''} onCurrentChange={selectCurrentRevision} onCompareChange={selectCompareRevision} onGenerate={generateEdits} /></div><div className="heading-actions"><button type="button" className="terminal-toggle" onClick={toggleTerminal}>{terminalOpen ? 'Close OpenCode' : 'Open OpenCode'}</button><button type="button" className="new-inquiry" onClick={startInquiry} disabled={loading}>+ New inquiry</button></div></div>
+              <div className="workspace-heading"><div><p className="eyebrow">INQUIRY WORKSPACE</p><h1>{state.program?.path}</h1>{focus && <p className="focus-status">Highlighting {focus.kind === 'symbol' ? focus.name : focus.path}<button type="button" className="clear-focus" onClick={() => setFocus(null)}>Clear</button></p>}<RevisionControls context={revisionContext} current={currentRevision} compare={compareRevision} workspace={workspaceRevision} canGenerate={currentRevision !== compareRevision && compareRevision !== ''} onCurrentChange={selectCurrentRevision} onCompareChange={selectCompareRevision} onGenerate={generateEdits} /></div><div className="heading-actions"><button type="button" className="terminal-toggle" onClick={toggleTerminal}>{terminalOpen ? 'Close OpenCode' : 'Open OpenCode'}</button><button type="button" className="new-inquiry" onClick={startInquiry} disabled={loading}>+ New inquiry</button></div></div>
            <div className="inquiry-list">
               {state.rows.map((row) => <InquiryRowView key={row.id} row={row} editInquiries={editInquiries} comparisonPreview={comparisonPreview} formatRequests={formatRequests} onFormat={requestFormat} focus={focus} textRefs={textRefs} editsFor={editsFor} editsForPath={editsForPath} workingCodeForPath={workingCodeForPath} comparisonActive={comparisonActive} completeFileByTile={completeFileByTile} onCompleteFileChange={(tileID, value) => setCompleteFileByTile((current) => ({ ...current, [tileID]: value }))} onApplyEdit={changeComparisonEdit} onOpenComparisonFile={openComparisonFileInquiry} onPackage={openPackage} onPackageColumn={openPackageColumn} onPackageLeft={openPackageLeft} onImport={openImport} onImportColumn={openImportColumn} onImportLeft={openImportLeft} onFile={openFile} onFileColumn={openFileColumn} onFileLeft={openFileLeft} onInspectFile={inspectFile} onInspectReference={inspectReference} onOpenReferenceLeft={openReferenceLeft} onOpenReferenceColumn={openReferenceColumn} onDeclaration={openDeclaration} onDeclarationColumn={openDeclarationColumn} onDeclarationLeft={openDeclarationLeft} onInspectDeclaration={inspectDeclaration} onLensChange={setLens} packageLens={packageLens} fileLens={fileLens} onTogglePane={togglePane} onToggleTile={toggleTile} onCloseColumn={closeColumn} onCloseTile={closeTile} onBack={goBack} />)}
           </div>
@@ -534,29 +547,30 @@ function flattenPackages(packages: Package[]): Package[] {
 }
 
 function filesFromState(state: HeadlessState): ComparisonFile[] {
-  const files: ComparisonFile[] = [];
+  const files = new Map<string, ComparisonFile>();
   for (const row of state.rows) {
     for (const tile of row.tiles) {
       for (const pkg of flattenPackages(tile.overview.packages ?? [])) {
-        for (const file of pkg.files ?? []) files.push({ packageDirectory: pkg.directory, packageName: pkg.name, file });
+        for (const file of pkg.files ?? []) files.set(`${pkg.directory}:${pkg.name}:${file.path}`, { packageDirectory: pkg.directory, packageName: pkg.name, file });
       }
       for (const file of tile.overview.files ?? []) {
-        files.push({ packageDirectory: tile.target.packagePath ?? '', packageName: tile.target.packageName ?? '', file });
+        files.set(`${tile.target.packagePath ?? ''}:${tile.target.packageName ?? ''}:${file.path}`, { packageDirectory: tile.target.packagePath ?? '', packageName: tile.target.packageName ?? '', file });
       }
       if (tile.target.filePath && (tile.target.kind === 'file' || tile.target.kind === 'declaration')) {
-        files.push({
+        const file = {
+          name: tile.target.filePath.split('/').pop() ?? tile.target.filePath,
+          path: tile.target.filePath,
+          declarations: tile.overview.declarations,
+        };
+        files.set(`${tile.target.packagePath ?? ''}:${tile.target.packageName ?? ''}:${file.path}`, {
           packageDirectory: tile.target.packagePath ?? '',
           packageName: tile.target.packageName ?? '',
-          file: {
-            name: tile.target.filePath.split('/').pop() ?? tile.target.filePath,
-            path: tile.target.filePath,
-            declarations: tile.overview.declarations,
-          },
+          file,
         });
       }
     }
   }
-  return files;
+  return Array.from(files.values());
 }
 
 function declarationForLine(declarations: Declaration[], line?: number): Declaration | undefined {
@@ -578,11 +592,12 @@ function editColumns(file: ComparisonFile): ComparisonFile[][] {
   }).filter((column) => column[0].edits.length > 0);
 }
 
-function RevisionControls({ context, current, compare, canGenerate, onCurrentChange, onCompareChange, onGenerate }: { context: RevisionContext | null; current: string; compare: string; canGenerate: boolean; onCurrentChange: (value: string) => void; onCompareChange: (value: string) => void; onGenerate: () => void }) {
+function RevisionControls({ context, current, compare, workspace, canGenerate, onCurrentChange, onCompareChange, onGenerate }: { context: RevisionContext | null; current: string; compare: string; workspace: string; canGenerate: boolean; onCurrentChange: (value: string) => void; onCompareChange: (value: string) => void; onGenerate: () => void }) {
   if (!context) return null;
   const options: RevisionOption[] = [{ kind: 'working-tree', ref: 'Working tree', hash: '', shortHash: '', date: '', subject: 'Current files on disk' }, ...context.options];
   const label = (option: RevisionOption) => option.kind === 'working-tree' ? option.ref : `${option.ref} · ${option.shortHash} · ${formatRevisionDate(option.date)}${option.subject ? ` · ${option.subject}` : ''}`;
-  return <section className="revision-context" aria-label="Revision comparison"><div className="git-status">Git: {context.branch || 'detached'} · {context.currentCommit ? `at ${context.currentCommit.slice(0, 7)}` : 'no commits yet'}</div><div className="comparison-direction">Workspace: Compare to. Diff baseline: Current revision.</div><div><label htmlFor="current-revision">Diff baseline</label><select id="current-revision" value={current} onChange={(event) => onCurrentChange(event.target.value)}>{options.map((option) => <option key={`current:${option.kind}:${option.hash || option.ref}`} value={option.kind === 'working-tree' ? 'working-tree' : option.hash}>{label(option)}</option>)}</select></div><div><label htmlFor="compare-revision">Workspace revision</label><select id="compare-revision" value={compare} onChange={(event) => onCompareChange(event.target.value)}><option value="">{context.options.length > 0 ? 'Choose a branch or commit' : 'Commit once to compare revisions'}</option>{context.options.map((option) => <option key={`compare:${option.kind}:${option.hash}`} value={option.hash}>{label(option)}</option>)}</select></div><button type="button" className="compare-placeholder" disabled={!canGenerate} onClick={onGenerate}>Generate edits</button></section>;
+  const viewing = workspace === compare && compare ? 'Compare to' : workspace === current ? 'Diff baseline' : 'Working AST';
+  return <section className="revision-context" aria-label="Revision comparison"><div className="git-status">Git: {context.branch || 'detached'} · {context.currentCommit ? `at ${context.currentCommit.slice(0, 7)}` : 'no commits yet'}</div><div className="comparison-direction">Viewing: {viewing}. Apply/remove creates a projected working AST.</div><div><label htmlFor="current-revision">Diff baseline</label><select id="current-revision" value={current} onChange={(event) => onCurrentChange(event.target.value)}>{options.map((option) => <option key={`current:${option.kind}:${option.hash || option.ref}`} value={option.kind === 'working-tree' ? 'working-tree' : option.hash}>{label(option)}</option>)}</select></div><div><label htmlFor="compare-revision">Compare to</label><select id="compare-revision" value={compare} onChange={(event) => onCompareChange(event.target.value)}><option value="">{context.options.length > 0 ? 'Choose a branch or commit' : 'Commit once to compare revisions'}</option>{context.options.map((option) => <option key={`compare:${option.kind}:${option.hash}`} value={option.hash}>{label(option)}</option>)}</select></div><button type="button" className="compare-placeholder" disabled={!canGenerate} onClick={onGenerate}>Generate edits</button></section>;
 }
 
 function formatRevisionDate(value: string): string {
@@ -915,7 +930,7 @@ function StructuralEditGroup({ inquiry, file, index, onApplyEdit, onOpenComparis
   const [expanded, setExpanded] = useState(Boolean(inquiry.declaration));
   const tree = buildComparisonTree(file.edits);
   const label = `${inquiry.title}${inquiry.columns.length > 1 ? ` · branch ${index + 1}` : ''}`;
-  return <div className="structural-edit-group"><div className="structural-edit-label"><button type="button" className="structural-edit-toggle" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>{expanded ? '−' : '+'}</button>{inquiry.declaration ? <button type="button" className="structural-edit-open" onClick={() => onOpenDeclaration(file.path, inquiry.declaration)}>{label}</button> : <span>{label}</span>}<span>{file.path}</span></div><button type="button" className="open-inquiry-button file-inquiry-button" onClick={() => onOpenComparisonFile(file)}>Open in new inquiry</button>{expanded && tree.map((node) => <ComparisonTreeNodeView key={`${inquiry.id}:${index}:${node.id}`} node={node} depth={0} packageDirectory={file.packageDirectory} packageName={file.packageName} file={file.path} onApplyEdit={onApplyEdit} />)}</div>;
+  return <div className="structural-edit-group"><div className="structural-edit-label"><button type="button" className="structural-edit-toggle" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>{expanded ? '−' : '+'}</button>{inquiry.declaration ? <button type="button" className="structural-edit-open" onClick={() => onOpenDeclaration(file.path, inquiry.declaration)}>{label}</button> : <span>{label}</span>}{inquiry.title !== file.path && <span>{file.path}</span>}</div><button type="button" className="open-inquiry-button file-inquiry-button" onClick={() => onOpenComparisonFile(file)}>Open in new inquiry</button>{expanded && tree.map((node) => <ComparisonTreeNodeView key={`${inquiry.id}:${index}:${node.id}`} node={node} depth={0} packageDirectory={file.packageDirectory} packageName={file.packageName} file={file.path} onApplyEdit={onApplyEdit} />)}</div>;
 }
 
 function ComparisonTreeSection({ tile, edits, excludedDeclarations, completeFile, onCompleteFileChange, onApplyEdit, onOpenDeclaration, onOpenDeclarationLeft }: { tile: Tile; edits: EditSummary[]; excludedDeclarations: Declaration[]; completeFile: boolean; onCompleteFileChange: (value: boolean) => void; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary, fullLine?: boolean) => void; onOpenDeclaration: (declaration: Declaration) => void; onOpenDeclarationLeft: (declaration: Declaration) => void }) {

@@ -164,6 +164,12 @@ func (state *WorkingState) Snapshot() WorkingSnapshot {
 	}
 }
 
+// TargetCode renders the immutable comparison target without changing the
+// projected working tree.
+func (state *WorkingState) TargetCode() RenderResult {
+	return RenderBestEffort(state.target)
+}
+
 // ValidateGo reports structural validity diagnostics for the working tree.
 func (state *WorkingState) ValidateGo() ValidationReport {
 	diagnostics := make([]string, 0)

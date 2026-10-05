@@ -39,6 +39,7 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
   const [revisionContext, setRevisionContext] = useState<RevisionContext | null>(null);
   const [currentRevision, setCurrentRevision] = useState('working-tree');
   const [compareRevision, setCompareRevision] = useState('');
+  const [workspaceRevision, setWorkspaceRevision] = useState('working-tree');
   const [editMap, setEditMap] = useState<Record<string, FileEditState>>({});
   const [comparisonActive, setComparisonActive] = useState(false);
   const [completeFileByTile, setCompleteFileByTile] = useState<Record<string, boolean>>({});
@@ -127,6 +128,7 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
 
   async function reloadProgram(stopTerminal: boolean) {
     setCurrentRevision('working-tree');
+    setWorkspaceRevision('working-tree');
     setComparisonActive(false);
     setEditMap({});
     setOpenedComparisonFiles({});
@@ -186,6 +188,7 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
     // Current is the comparison baseline. Keep the visible explorer on the
     // compare-to revision while the diff inputs are being changed.
     const activeRevision = compareRevision || revision;
+    setWorkspaceRevision(activeRevision);
     if (state?.program?.path) update(() => engine.selectRevision(state.program.path, activeRevision));
   }
 
@@ -195,14 +198,28 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
     setEditMap({});
     setOpenedComparisonFiles({});
     comparisonOpenKey.current = null;
+    setWorkspaceRevision(revision);
     if (state?.program?.path) update(() => engine.selectRevision(state.program.path, revision));
   }
 
-  function generateEdits() {
+  async function generateEdits() {
     setError('');
     setEditMap({});
     setOpenedComparisonFiles({});
     comparisonOpenKey.current = null;
+
+    if (state?.program?.path && compareRevision && workspaceRevision !== compareRevision) {
+      setLoading(true);
+      try {
+        setState(await engine.selectRevision(state.program.path, compareRevision));
+        setWorkspaceRevision(compareRevision);
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'Unable to load the workspace revision.');
+        return;
+      } finally {
+        setLoading(false);
+      }
+    }
     setComparisonActive(true);
   }
 

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { App, buildComparisonTree, buildEditInquiries } from './App';
 import type { EditSummary, FileEditState, HeadlessState, InquiryEngine } from './inquiryEngine';
 
-function fakeEngine(initialState?: HeadlessState, fileEdits: EditSummary[] = [{ index: 0, kind: 'UPDATE', nodeId: 'main.Decl', nodeKind: '*ast.FuncDecl', field: 'Body', position: 0, startLine: 1, endLine: 3 }], onOpenFile?: (path: string) => void, workingCode = ''): InquiryEngine {
+function fakeEngine(initialState?: HeadlessState, fileEdits: EditSummary[] = [{ index: 0, kind: 'UPDATE', nodeId: 'main.Decl', nodeKind: '*ast.FuncDecl', field: 'Body', position: 0, startLine: 1, endLine: 3 }], onOpenFile?: (path: string) => void, workingCode = '', onSelectRevision?: (revision: string) => void): InquiryEngine {
   let state: HeadlessState = initialState ?? {
     revision: 1,
     program: { path: '/tmp/example' },
@@ -21,7 +21,10 @@ function fakeEngine(initialState?: HeadlessState, fileEdits: EditSummary[] = [{ 
     writeOpenCodeInput: async () => undefined,
     resizeOpenCode: async () => undefined,
     stopOpenCode: async () => undefined,
-    selectRevision: result,
+    selectRevision: async (_directory, revision) => {
+      onSelectRevision?.(revision);
+      return result();
+    },
     getFileEdits: async () => fileEdits,
     getFileEditState: async () => fileEditState(),
     getComparisonFiles: async () => [],
@@ -146,6 +149,14 @@ describe('App', () => {
     expect(screen.getAllByText('main.go').length).toBeGreaterThanOrEqual(1);
     fireEvent.click(screen.getAllByRole('button', { name: 'Apply' })[0]);
     expect((await screen.findAllByRole('button', { name: 'Remove' })).length).toBeGreaterThan(0);
+  });
+
+  it('loads Compare to as the workspace before generating edits', async () => {
+    let selectedRevision = '';
+    render(<App providedEngine={fakeEngine(undefined, undefined, undefined, '', (revision) => { selectedRevision = revision; })} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate edits' }));
+    expect(selectedRevision).toBe('abc1234');
   });
 
   it('shows comparison results from the program explorer tile', async () => {

@@ -1,11 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
-import { createWailsEngine, type Declaration, type EditSummary, type File, type FileEditState, type HeadlessState, type ImportSummary, type InquiryEngine, type InquiryRow, type Occurrence, type Package, type Reference, type RevisionContext, type RevisionOption, type Tile } from './inquiryEngine';
+import * as prettier from 'prettier/standalone';
+import * as prettierBabel from 'prettier/plugins/babel';
+import * as prettierEstree from 'prettier/plugins/estree';
+import * as prettierTypescript from 'prettier/plugins/typescript';
+import { FitAddon } from '@xterm/addon-fit';
+import { Terminal } from '@xterm/xterm';
+import { EventsOn } from '../wailsjs/runtime/runtime';
+import '@xterm/xterm/css/xterm.css';
+import { createWailsEngine, type ComparisonFile as ComparisonFileRecord, type Declaration, type EditSummary, type File, type FileEditState, type HeadlessState, type ImportSummary, type InquiryEngine, type InquiryRow, type Occurrence, type Package, type Reference, type RevisionContext, type RevisionOption, type Tile } from './inquiryEngine';
 
 type FocusTarget =
   | { kind: 'symbol'; symbolId: string; name: string }
   | { kind: 'import'; path: string; name?: string };
 
-type PackageLens = 'files' | 'api';
+type PackageLens = 'files' | 'api' | 'internal';
 type FileLens = 'all' | 'exported' | 'internal';
 
 type ComparisonFile = { packageDirectory: string; packageName: string; path: string; edits: EditSummary[]; declaration?: Declaration };
@@ -39,6 +47,13 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
   const textRefs = useRef<Record<string, HTMLPreElement | null>>({});
   const comparisonOpenKey = useRef<string | null>(null);
   const [lenses, setLenses] = useState<Record<string, PackageLens | FileLens>>({});
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [terminalStarted, setTerminalStarted] = useState(false);
+  const [openedComparisonFiles, setOpenedComparisonFiles] = useState<Record<string, boolean>>({});
+  const [formatRequests, setFormatRequests] = useState<Record<string, number>>({});
+  const comparisonPreview = comparisonActive
+    ? Object.values(editMap).find((editState) => editState.workingCode.trim() !== '') ?? Object.values(editMap)[0]
+    : undefined;
 
   useEffect(() => {
     engine.getCurrentState().then(setState).catch(() => undefined);
@@ -54,43 +69,28 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
 
   useEffect(() => {
     if (!comparisonActive || !state?.program?.path || !compareRevision) return;
-    const requests = state.rows.flatMap((row) => row.tiles).flatMap((tile) => {
-      const packageDirectory = tile.target.packagePath ?? '';
-      const packageName = tile.target.packageName ?? '';
-      if (tile.target.kind === 'program') {
-        return (tile.overview.packages ?? []).flatMap((pkg) => (pkg.files ?? []).map((file) => ({ packageDirectory: pkg.directory, packageName: pkg.name, filePath: file.path })));
+    const loadComparison = async () => {
+      const knownFiles = filesFromState(state);
+      const revisionFiles = await engine.getComparisonFiles(state.program.path, currentRevision, compareRevision).catch(() => []);
+      const files = new Map<string, ComparisonFileRecord>();
+      for (const file of [...knownFiles, ...revisionFiles]) {
+        files.set(`${file.packageDirectory}:${file.packageName}:${file.file.path}`, file);
       }
-      if (tile.target.kind === 'package') {
-        return (tile.overview.files ?? []).map((file) => ({ packageDirectory, packageName, filePath: file.path }));
-      }
-      return tile.target.filePath && (tile.target.kind === 'file' || tile.target.kind === 'declaration') ? [{ packageDirectory, packageName, filePath: tile.target.filePath }] : [];
-    }).map(async ({ packageDirectory, packageName, filePath }) => {
-      const key = `${packageDirectory}:${packageName}:${filePath}`;
-      try {
-        return [key, await engine.getFileEditState(state.program?.path ?? directory, currentRevision, compareRevision, packageDirectory, packageName, filePath)] as const;
-      } catch (reason) {
-        throw reason instanceof Error ? reason : new Error('Unable to load comparison edits.');
-      }
-    });
-    Promise.all(requests).then(async (entries) => {
-      const nextEditMap = Object.fromEntries(entries);
+      const requests = Array.from(files.values()).map(async ({ packageDirectory, packageName, file }) => {
+        const key = `${packageDirectory}:${packageName}:${file.path}`;
+        try {
+          return [key, await engine.getFileEditState(state.program?.path ?? directory, currentRevision, compareRevision, packageDirectory, packageName, file.path)] as const;
+        } catch {
+          return null;
+        }
+      });
+      const entries = await Promise.all(requests);
+      const nextEditMap = Object.fromEntries(entries.filter((entry): entry is readonly [string, FileEditState] => entry !== null));
       setEditMap(nextEditMap);
       const openKey = `${currentRevision}:${compareRevision}`;
-      if (comparisonOpenKey.current === openKey) return;
-      const inquiry = buildEditInquiries(state, nextEditMap)[0];
-      const file = inquiry?.columns[0]?.[0];
-      const row = state.rows.find((candidate) => candidate.id === state.active.rowId) ?? state.rows.find((candidate) => candidate.title === 'Program inquiry');
-      const tile = row?.tiles.find((candidate) => candidate.id === state.active.tileId) ?? row?.tiles.find((candidate) => candidate.target.kind === 'program');
-      if (!file || !row || !tile) return;
       comparisonOpenKey.current = openKey;
-      try {
-        const nextState = await engine.navigateFile(row.id, tile.id, file.packageDirectory, file.packageName, file.path);
-        setState(nextState);
-      } catch (reason) {
-        comparisonOpenKey.current = null;
-        setError(reason instanceof Error ? reason.message : 'Unable to open the affected file.');
-      }
-    }).catch((reason) => {
+    };
+    loadComparison().catch((reason) => {
       setError(reason instanceof Error ? reason.message : 'Unable to load comparison edits.');
     });
   }, [compareRevision, comparisonActive, currentRevision, directory, engine, state]);
@@ -125,29 +125,101 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
     }
   }
 
-  function exploreProgram() {
+  async function reloadProgram(stopTerminal: boolean) {
     setCurrentRevision('working-tree');
     setComparisonActive(false);
     setEditMap({});
-    update(() => engine.openProgram(directory));
+    setOpenedComparisonFiles({});
+    comparisonOpenKey.current = null;
+    if (stopTerminal && terminalStarted) {
+      await engine.stopOpenCode().catch(() => undefined);
+      setTerminalStarted(false);
+      setTerminalOpen(false);
+    }
+    setLoading(true);
+    setError('');
+    try {
+      const nextState = await engine.openProgram(directory);
+      setState(nextState);
+      const context = await engine.getRevisionContext(directory).catch(() => null);
+      setRevisionContext(context);
+      setCompareRevision(context?.currentCommit ?? '');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to load the program.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function exploreProgram() {
+    void reloadProgram(true);
+  }
+
+  function refreshProgram() {
+    void reloadProgram(false);
+  }
+
+  async function toggleTerminal() {
+    if (terminalOpen) {
+      setTerminalOpen(false);
+      return;
+    }
+    setTerminalStarted(true);
+    setTerminalOpen(true);
+  }
+
+  async function chooseDirectory() {
+    setError('');
+    try {
+      const selected = await engine.chooseDirectory();
+      if (selected) setDirectory(selected);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to choose a folder.');
+    }
   }
 
   function selectCurrentRevision(revision: string) {
     setCurrentRevision(revision);
     setComparisonActive(false);
     setEditMap({});
+    setOpenedComparisonFiles({});
+    if (state?.program?.path) update(() => engine.selectRevision(state.program.path, revision));
+  }
+
+  function selectCompareRevision(revision: string) {
+    setCompareRevision(revision);
+    setComparisonActive(false);
+    setEditMap({});
+    setOpenedComparisonFiles({});
+    comparisonOpenKey.current = null;
     if (state?.program?.path) update(() => engine.selectRevision(state.program.path, revision));
   }
 
   function generateEdits() {
     setError('');
     setEditMap({});
+    setOpenedComparisonFiles({});
     comparisonOpenKey.current = null;
     setComparisonActive(true);
   }
 
   function startInquiry() {
     update(() => engine.startInquiry('New inquiry'));
+  }
+
+  function openComparisonFileInquiry(file: ComparisonFile) {
+    const key = `${file.packageDirectory}:${file.packageName}:${file.path}`;
+    setOpenedComparisonFiles((current) => ({ ...current, [key]: true }));
+    setLoading(true);
+    setError('');
+    engine.openComparisonFile(directory, currentRevision, compareRevision, file.packageDirectory, file.packageName, file.path)
+      .then(setState)
+      .catch((reason) => setError(reason instanceof Error ? reason.message : 'Unable to open the comparison file.'))
+      .finally(() => setLoading(false));
+  }
+
+  function requestFormat(tileID: string) {
+    setFormatRequests((current) => ({ ...current, [tileID]: (current[tileID] ?? 0) + 1 }));
   }
 
   function togglePane(rowID: string, tile: Tile, pane: 'overview' | 'text') {
@@ -308,7 +380,12 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
     }
   }
 
-  const editInquiries = comparisonActive && state ? buildEditInquiries(state, editMap) : [];
+  const editInquiries = comparisonActive && state
+    ? buildEditInquiries(state, editMap).filter((inquiry) => {
+      const file = inquiry.columns[0]?.[0];
+      return !file || !openedComparisonFiles[`${file.packageDirectory}:${file.packageName}:${file.path}`];
+    })
+    : [];
 
   return (
     <main className="app-shell">
@@ -317,8 +394,9 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
         <div className="sidebar-section">
           <p className="eyebrow">PROGRAM</p>
           <label htmlFor="directory">Directory</label>
-          <input id="directory" value={directory} onChange={(event) => setDirectory(event.target.value)} placeholder="/path/to/program" />
+          <div className="directory-picker"><input id="directory" value={directory} onChange={(event) => setDirectory(event.target.value)} placeholder="/path/to/program" /><button type="button" className="choose-directory" onClick={chooseDirectory} disabled={loading}>Choose folder</button></div>
           <button type="button" onClick={exploreProgram} disabled={loading || directory.trim() === ''}>{loading ? 'Opening...' : 'Explore program'}</button>
+          {state && <button type="button" className="refresh-program" onClick={refreshProgram} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh project'}</button>}
             {state && <p className="revision">Revision {state.revision} · {state.rows.length} {state.rows.length === 1 ? 'inquiry' : 'inquiries'}</p>}
           {error && <p className="error">{error}</p>}
         </div>
@@ -327,22 +405,80 @@ export function App({ providedEngine }: { providedEngine?: InquiryEngine } = {})
       <section className="workspace" aria-label="Contuts inquiry workspace">
         {!state && <div className="welcome"><h1>Contuts hello</h1><p>Open a program to begin an inquiry.</p></div>}
         {state && <>
-            <div className="workspace-heading"><div><p className="eyebrow">INQUIRY WORKSPACE</p><h1>{state.program?.path}</h1>{focus && <p className="focus-status">Highlighting {focus.kind === 'symbol' ? focus.name : focus.path}<button type="button" className="clear-focus" onClick={() => setFocus(null)}>Clear</button></p>}<RevisionControls context={revisionContext} current={currentRevision} compare={compareRevision} canGenerate={currentRevision !== compareRevision && compareRevision !== ''} onCurrentChange={selectCurrentRevision} onCompareChange={(revision) => { setCompareRevision(revision); setComparisonActive(false); setEditMap({}); }} onGenerate={generateEdits} /></div><button type="button" className="new-inquiry" onClick={startInquiry} disabled={loading}>+ New inquiry</button></div>
+             <div className="workspace-heading"><div><p className="eyebrow">INQUIRY WORKSPACE</p><h1>{state.program?.path}</h1>{focus && <p className="focus-status">Highlighting {focus.kind === 'symbol' ? focus.name : focus.path}<button type="button" className="clear-focus" onClick={() => setFocus(null)}>Clear</button></p>}<RevisionControls context={revisionContext} current={currentRevision} compare={compareRevision} canGenerate={currentRevision !== compareRevision && compareRevision !== ''} onCurrentChange={selectCurrentRevision} onCompareChange={selectCompareRevision} onGenerate={generateEdits} /></div><div className="heading-actions"><button type="button" className="terminal-toggle" onClick={toggleTerminal}>{terminalOpen ? 'Close OpenCode' : 'Open OpenCode'}</button><button type="button" className="new-inquiry" onClick={startInquiry} disabled={loading}>+ New inquiry</button></div></div>
            <div className="inquiry-list">
-              {state.rows.map((row) => <InquiryRowView key={row.id} row={row} editInquiries={editInquiries} focus={focus} textRefs={textRefs} editsFor={editsFor} editsForPath={editsForPath} workingCodeForPath={workingCodeForPath} comparisonActive={comparisonActive} completeFileByTile={completeFileByTile} onCompleteFileChange={(tileID, value) => setCompleteFileByTile((current) => ({ ...current, [tileID]: value }))} onApplyEdit={changeComparisonEdit} onPackage={openPackage} onPackageColumn={openPackageColumn} onPackageLeft={openPackageLeft} onImport={openImport} onImportColumn={openImportColumn} onImportLeft={openImportLeft} onFile={openFile} onFileColumn={openFileColumn} onFileLeft={openFileLeft} onInspectFile={inspectFile} onInspectReference={inspectReference} onOpenReferenceLeft={openReferenceLeft} onOpenReferenceColumn={openReferenceColumn} onDeclaration={openDeclaration} onDeclarationColumn={openDeclarationColumn} onDeclarationLeft={openDeclarationLeft} onInspectDeclaration={inspectDeclaration} onLensChange={setLens} packageLens={packageLens} fileLens={fileLens} onTogglePane={togglePane} onToggleTile={toggleTile} onCloseColumn={closeColumn} onCloseTile={closeTile} onBack={goBack} />)}
+              {state.rows.map((row) => <InquiryRowView key={row.id} row={row} editInquiries={editInquiries} comparisonPreview={comparisonPreview} formatRequests={formatRequests} onFormat={requestFormat} focus={focus} textRefs={textRefs} editsFor={editsFor} editsForPath={editsForPath} workingCodeForPath={workingCodeForPath} comparisonActive={comparisonActive} completeFileByTile={completeFileByTile} onCompleteFileChange={(tileID, value) => setCompleteFileByTile((current) => ({ ...current, [tileID]: value }))} onApplyEdit={changeComparisonEdit} onOpenComparisonFile={openComparisonFileInquiry} onPackage={openPackage} onPackageColumn={openPackageColumn} onPackageLeft={openPackageLeft} onImport={openImport} onImportColumn={openImportColumn} onImportLeft={openImportLeft} onFile={openFile} onFileColumn={openFileColumn} onFileLeft={openFileLeft} onInspectFile={inspectFile} onInspectReference={inspectReference} onOpenReferenceLeft={openReferenceLeft} onOpenReferenceColumn={openReferenceColumn} onDeclaration={openDeclaration} onDeclarationColumn={openDeclarationColumn} onDeclarationLeft={openDeclarationLeft} onInspectDeclaration={inspectDeclaration} onLensChange={setLens} packageLens={packageLens} fileLens={fileLens} onTogglePane={togglePane} onToggleTile={toggleTile} onCloseColumn={closeColumn} onCloseTile={closeTile} onBack={goBack} />)}
           </div>
           <button type="button" className="bottom-inquiry" onClick={startInquiry} disabled={loading}>+ Start another inquiry at the bottom</button>
         </>}
       </section>
+      {terminalStarted && <OpenCodeTerminal engine={engine} directory={state.program?.path ?? directory} visible={terminalOpen} onClose={() => setTerminalOpen(false)} onStopped={() => { setTerminalStarted(false); setTerminalOpen(false); }} />}
     </main>
   );
 }
 
-export function buildEditInquiries(state: HeadlessState, editMap: Record<string, FileEditState>): EditInquiry[] {
+function OpenCodeTerminal({ engine, directory, visible, onClose, onStopped }: { engine: InquiryEngine; directory: string; visible: boolean; onClose: () => void; onStopped: () => void }) {
+  const terminalRef = useRef<HTMLDivElement | null>(null);
+  const instanceRef = useRef<Terminal | null>(null);
+  const [running, setRunning] = useState(true);
+
+  useEffect(() => {
+    const terminal = new Terminal({
+      cursorBlink: true,
+      fontFamily: '"JetBrains Mono", monospace',
+      fontSize: 13,
+      scrollback: 5000,
+      theme: { background: '#0d1018', foreground: '#dfe2ec', cursor: '#b36aff' },
+    });
+    const fit = new FitAddon();
+    terminal.loadAddon(fit);
+    if (terminalRef.current) terminal.open(terminalRef.current);
+    instanceRef.current = terminal;
+    const resize = () => {
+      fit.fit();
+      engine.resizeOpenCode(terminal.cols, terminal.rows).catch(() => undefined);
+    };
+    const removeOutput = EventsOn('opencode:output', (output: string) => terminal.write(output));
+    const removeStatus = EventsOn('opencode:status', (status: { running?: boolean; error?: string }) => {
+      if (status.running === false) {
+        setRunning(false);
+        onStopped();
+        if (status.error) terminal.write(`\r\n\x1b[31mOpenCode stopped: ${status.error}\x1b[0m\r\n`);
+      }
+    });
+    const input = terminal.onData((data) => engine.writeOpenCodeInput(data).catch(() => undefined));
+    const observer = new ResizeObserver(resize);
+    if (terminalRef.current) observer.observe(terminalRef.current);
+    resize();
+    engine.startOpenCode(directory).catch((reason) => {
+      terminal.write(`\r\n\x1b[31mUnable to start OpenCode: ${reason instanceof Error ? reason.message : String(reason)}\x1b[0m\r\n`);
+      setRunning(false);
+      onStopped();
+    });
+    return () => {
+      observer.disconnect();
+      input.dispose();
+      removeOutput();
+      removeStatus();
+      terminal.dispose();
+      instanceRef.current = null;
+    };
+  }, [directory, engine]);
+
+  return <aside className={`opencode-terminal${visible ? '' : ' hidden'}`} aria-label="OpenCode terminal" aria-hidden={!visible}>
+    <header className="terminal-header"><div><strong>OpenCode</strong><span>{directory}</span></div><div className="terminal-actions"><span className={running ? 'terminal-state running' : 'terminal-state'}>{running ? 'running' : 'stopped'}</span><button type="button" onClick={onClose}>Close</button></div></header>
+    <div className="terminal-screen" ref={terminalRef} />
+  </aside>;
+}
+
+export function buildEditInquiries(state: HeadlessState, editMap: Record<string, FileEditState>, comparisonFiles: ComparisonFile[] = []): EditInquiry[] {
   const files = new Map<string, File & { packageDirectory: string; packageName: string }>();
+  for (const comparisonFile of comparisonFiles) {
+    files.set(`${comparisonFile.packageDirectory}:${comparisonFile.packageName}:${comparisonFile.file.path}`, { ...comparisonFile.file, packageDirectory: comparisonFile.packageDirectory, packageName: comparisonFile.packageName });
+  }
   for (const row of state.rows) {
     for (const tile of row.tiles) {
-      for (const pkg of tile.overview.packages ?? []) {
+      for (const pkg of flattenPackages(tile.overview.packages ?? [])) {
         for (const file of pkg.files ?? []) files.set(`${pkg.directory}:${pkg.name}:${file.path}`, { ...file, packageDirectory: pkg.directory, packageName: pkg.name });
       }
       for (const file of tile.overview.files ?? []) {
@@ -373,6 +509,36 @@ export function buildEditInquiries(state: HeadlessState, editMap: Record<string,
   }));
 }
 
+function flattenPackages(packages: Package[]): Package[] {
+  return packages.flatMap((pkg) => [pkg, ...flattenPackages(pkg.children ?? [])]);
+}
+
+function filesFromState(state: HeadlessState): ComparisonFile[] {
+  const files: ComparisonFile[] = [];
+  for (const row of state.rows) {
+    for (const tile of row.tiles) {
+      for (const pkg of flattenPackages(tile.overview.packages ?? [])) {
+        for (const file of pkg.files ?? []) files.push({ packageDirectory: pkg.directory, packageName: pkg.name, file });
+      }
+      for (const file of tile.overview.files ?? []) {
+        files.push({ packageDirectory: tile.target.packagePath ?? '', packageName: tile.target.packageName ?? '', file });
+      }
+      if (tile.target.filePath && (tile.target.kind === 'file' || tile.target.kind === 'declaration')) {
+        files.push({
+          packageDirectory: tile.target.packagePath ?? '',
+          packageName: tile.target.packageName ?? '',
+          file: {
+            name: tile.target.filePath.split('/').pop() ?? tile.target.filePath,
+            path: tile.target.filePath,
+            declarations: tile.overview.declarations,
+          },
+        });
+      }
+    }
+  }
+  return files;
+}
+
 function declarationForLine(declarations: Declaration[], line?: number): Declaration | undefined {
   if (line === undefined) return undefined;
   const matches = declarations.flatMap((declaration) => {
@@ -396,7 +562,7 @@ function RevisionControls({ context, current, compare, canGenerate, onCurrentCha
   if (!context) return null;
   const options: RevisionOption[] = [{ kind: 'working-tree', ref: 'Working tree', hash: '', shortHash: '', date: '', subject: 'Current files on disk' }, ...context.options];
   const label = (option: RevisionOption) => option.kind === 'working-tree' ? option.ref : `${option.ref} · ${option.shortHash} · ${formatRevisionDate(option.date)}${option.subject ? ` · ${option.subject}` : ''}`;
-  return <section className="revision-context" aria-label="Revision comparison"><div><label htmlFor="current-revision">Current revision</label><select id="current-revision" value={current} onChange={(event) => onCurrentChange(event.target.value)}>{options.map((option) => <option key={`current:${option.kind}:${option.hash || option.ref}`} value={option.kind === 'working-tree' ? 'working-tree' : option.hash}>{label(option)}</option>)}</select></div><div><label htmlFor="compare-revision">Compare to</label><select id="compare-revision" value={compare} onChange={(event) => onCompareChange(event.target.value)}><option value="">Choose a branch or commit</option>{context.options.map((option) => <option key={`compare:${option.kind}:${option.hash}`} value={option.hash}>{label(option)}</option>)}</select></div><button type="button" className="compare-placeholder" disabled={!canGenerate} onClick={onGenerate}>Generate edits</button></section>;
+  return <section className="revision-context" aria-label="Revision comparison"><div className="git-status">Git: {context.branch || 'detached'} · {context.currentCommit ? `at ${context.currentCommit.slice(0, 7)}` : 'no commits yet'}</div><div className="comparison-direction">Workspace uses Compare to; edits describe changes from Current revision.</div><div><label htmlFor="current-revision">Current revision</label><select id="current-revision" value={current} onChange={(event) => onCurrentChange(event.target.value)}>{options.map((option) => <option key={`current:${option.kind}:${option.hash || option.ref}`} value={option.kind === 'working-tree' ? 'working-tree' : option.hash}>{label(option)}</option>)}</select></div><div><label htmlFor="compare-revision">Compare to</label><select id="compare-revision" value={compare} onChange={(event) => onCompareChange(event.target.value)}><option value="">{context.options.length > 0 ? 'Choose a branch or commit' : 'Commit once to compare revisions'}</option>{context.options.map((option) => <option key={`compare:${option.kind}:${option.hash}`} value={option.hash}>{label(option)}</option>)}</select></div><button type="button" className="compare-placeholder" disabled={!canGenerate} onClick={onGenerate}>Generate edits</button></section>;
 }
 
 function formatRevisionDate(value: string): string {
@@ -475,6 +641,9 @@ export function buildComparisonTree(edits: EditSummary[], scope?: Declaration, e
 type RowProps = {
   row: InquiryRow;
   editInquiries: EditInquiry[];
+  comparisonPreview?: FileEditState;
+  formatRequests: Record<string, number>;
+  onFormat: (tileID: string) => void;
   editsFor: (tile: Tile) => EditSummary[];
   editsForPath: (packageDirectory: string, packageName: string, filePath: string) => EditSummary[];
   workingCodeForPath: (packageDirectory: string, packageName: string, filePath: string) => FileEditState | undefined;
@@ -482,6 +651,7 @@ type RowProps = {
   completeFileByTile: Record<string, boolean>;
   onCompleteFileChange: (tileID: string, value: boolean) => void;
   onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary, fullLine?: boolean) => void;
+  onOpenComparisonFile: (file: ComparisonFile) => void;
   focus: FocusTarget | null;
   textRefs: React.MutableRefObject<Record<string, HTMLPreElement | null>>;
   onPackage: (row: InquiryRow, tile: Tile, pkg: Package) => void;
@@ -511,7 +681,7 @@ type RowProps = {
   onBack: (row: InquiryRow, tile: Tile) => void;
 };
 
-function InquiryRowView({ row, editInquiries, focus, editsFor, editsForPath, workingCodeForPath, comparisonActive, completeFileByTile, onCompleteFileChange, onApplyEdit, textRefs, onPackage, onPackageColumn, onPackageLeft, onImport, onImportColumn, onImportLeft, onFile, onFileColumn, onFileLeft, onInspectFile, onInspectReference, onOpenReferenceLeft, onOpenReferenceColumn, onDeclaration, onDeclarationColumn, onDeclarationLeft, onInspectDeclaration, onLensChange, packageLens, fileLens, onTogglePane, onToggleTile, onCloseColumn, onCloseTile, onBack }: RowProps) {
+function InquiryRowView({ row, editInquiries, comparisonPreview, formatRequests, onFormat, focus, editsFor, editsForPath, workingCodeForPath, comparisonActive, completeFileByTile, onCompleteFileChange, onApplyEdit, onOpenComparisonFile, textRefs, onPackage, onPackageColumn, onPackageLeft, onImport, onImportColumn, onImportLeft, onFile, onFileColumn, onFileLeft, onInspectFile, onInspectReference, onOpenReferenceLeft, onOpenReferenceColumn, onDeclaration, onDeclarationColumn, onDeclarationLeft, onInspectDeclaration, onLensChange, packageLens, fileLens, onTogglePane, onToggleTile, onCloseColumn, onCloseTile, onBack }: RowProps) {
   return <section className="inquiry-row"><div className="row-heading"><span>{row.title ?? 'Inquiry'}</span><span className="row-count">{row.tiles.length} tile{row.tiles.length === 1 ? '' : 's'}</span></div><div className="tile-strip">
     {row.tiles.map((tile) => <article className="tile" key={tile.id}>
        <div className="tile-meta"><span>Column {tile.column + 1}</span><span className="tile-meta-actions">{tile.openedBy && <span className="relationship">{tile.openedBy.relationship}</span>}<button type="button" className="close-tile" onClick={() => onCloseTile(row, tile)} disabled={row.tiles.length === 1} aria-label={`Close column ${tile.column + 1}`}>Close</button><button type="button" className="close-tile" onClick={() => onBack(row, tile)} disabled={!tile.canGoBack}>Back</button><button type="button" className="close-tile" onClick={() => onToggleTile(row.id, tile)} aria-expanded={!tile.collapsed}>{tile.collapsed ? 'Open' : 'Collapse'}</button></span></div>
@@ -519,35 +689,92 @@ function InquiryRowView({ row, editInquiries, focus, editsFor, editsForPath, wor
       {!tile.collapsed && <div className="tile-views">
         <section className={`tile-view overview-view ${tile.panes.overviewCollapsed ? 'collapsed' : ''}`}>
           <button type="button" className="pane-heading" onClick={() => onTogglePane(row.id, tile, 'overview')}><span>Overview</span><span>{tile.panes.overviewCollapsed ? '+' : '−'}</span></button>
-           {!tile.panes.overviewCollapsed && <Overview tile={tile} row={row} editInquiries={tile.target.kind === 'program' && row.title === 'Program inquiry' ? editInquiries : []} edits={editsFor(tile)} comparisonActive={comparisonActive} completeFile={completeFileByTile[tile.id] === true} onCompleteFileChange={(value) => onCompleteFileChange(tile.id, value)} onApplyEdit={onApplyEdit} editsForPath={editsForPath} packageLens={packageLens(tile)} fileLens={fileLens(tile)} onLensChange={onLensChange} onPackage={onPackage} onPackageColumn={onPackageColumn} onPackageLeft={onPackageLeft} onImport={onImport} onImportColumn={onImportColumn} onImportLeft={onImportLeft} onFile={onFile} onFileColumn={onFileColumn} onFileLeft={onFileLeft} onInspectDeclaration={onInspectDeclaration} onDeclaration={onDeclaration} onDeclarationColumn={onDeclarationColumn} onDeclarationLeft={onDeclarationLeft} onInspectReference={onInspectReference} onOpenReferenceLeft={onOpenReferenceLeft} onOpenReferenceColumn={onOpenReferenceColumn} />}
+           {!tile.panes.overviewCollapsed && <Overview tile={tile} row={row} editInquiries={tile.target.kind === 'program' && row.title === 'Program inquiry' ? editInquiries : []} edits={editsFor(tile)} comparisonActive={comparisonActive} completeFile={completeFileByTile[tile.id] === true} onCompleteFileChange={(value) => onCompleteFileChange(tile.id, value)} onApplyEdit={onApplyEdit} onOpenComparisonFile={onOpenComparisonFile} editsForPath={editsForPath} packageLens={packageLens(tile)} fileLens={fileLens(tile)} onLensChange={onLensChange} onPackage={onPackage} onPackageColumn={onPackageColumn} onPackageLeft={onPackageLeft} onImport={onImport} onImportColumn={onImportColumn} onImportLeft={onImportLeft} onFile={onFile} onFileColumn={onFileColumn} onFileLeft={onFileLeft} onInspectDeclaration={onInspectDeclaration} onDeclaration={onDeclaration} onDeclarationColumn={onDeclarationColumn} onDeclarationLeft={onDeclarationLeft} onInspectReference={onInspectReference} onOpenReferenceLeft={onOpenReferenceLeft} onOpenReferenceColumn={onOpenReferenceColumn} />}
         </section>
         <section className={`tile-view text-view ${tile.panes.textCollapsed ? 'collapsed' : ''}`}>
-          <button type="button" className="pane-heading" onClick={() => onTogglePane(row.id, tile, 'text')}><span>Text representation</span><span>{tile.panes.textCollapsed ? '+' : '−'}</span></button>
-           {!tile.panes.textCollapsed && (tile.target.kind === 'package' ? <PackageSourcePane tile={tile} focus={focus} textRefs={textRefs} row={row} onInspectFile={onInspectFile} workingCodeForPath={workingCodeForPath} /> : <TextRepresentation tile={tile} focus={focus} textRefs={textRefs} editState={workingCodeForPath(tile.target.packagePath ?? '', tile.target.packageName ?? '', tile.target.filePath ?? '')} />)}
+           <div className="pane-heading"><button type="button" className="pane-heading-toggle" onClick={() => onTogglePane(row.id, tile, 'text')}><span>Text representation</span><span>{tile.panes.textCollapsed ? '+' : '−'}</span></button>{tile.target.kind !== 'package' && <button type="button" className="format-button" onClick={() => onFormat(tile.id)} disabled={tile.panes.textCollapsed}>Format</button>}</div>
+           {!tile.panes.textCollapsed && (tile.target.kind === 'package' ? <PackageSourcePane tile={tile} focus={focus} textRefs={textRefs} row={row} onInspectFile={onInspectFile} workingCodeForPath={workingCodeForPath} /> : <TextRepresentation tile={tile} focus={focus} textRefs={textRefs} editState={tile.target.kind === 'program' ? comparisonPreview : workingCodeForPath(tile.target.packagePath ?? '', tile.target.packageName ?? '', tile.target.filePath ?? '')} formatRequest={formatRequests[tile.id] ?? 0} />)}
         </section>
       </div>}
     </article>)}
   </div></section>;
 }
 
-function TextRepresentation({ tile, focus, textRefs, editState }: { tile: Tile; focus: FocusTarget | null; textRefs: React.MutableRefObject<Record<string, HTMLPreElement | null>>; editState?: FileEditState }) {
-  const content = tile.target.kind === 'declaration' ? declarationContent(tile, editState) : editState?.workingCode || tile.text.content;
+function TextRepresentation({ tile, focus, textRefs, editState, formatRequest }: { tile: Tile; focus: FocusTarget | null; textRefs: React.MutableRefObject<Record<string, HTMLPreElement | null>>; editState?: FileEditState; formatRequest: number }) {
+  const rawContent = tile.target.kind === 'declaration' ? declarationContent(tile, editState) : editState ? editState.workingCode : tile.text.content;
+  const [content, setContent] = useState(rawContent);
+  const [formatError, setFormatError] = useState('');
+  useEffect(() => {
+    let active = true;
+    if (!rawContent || (tile.text.language !== 'typescript' && tile.text.language !== 'tsx')) {
+      setContent(rawContent);
+      setFormatError('');
+      return () => { active = false; };
+    }
+    setFormatError('');
+    prettier.format(rawContent, {
+      parser: tile.text.language === 'tsx' ? 'babel-ts' : 'typescript',
+      plugins: [prettierBabel, prettierEstree, prettierTypescript],
+      singleQuote: true,
+      semi: true,
+      tabWidth: 2,
+      printWidth: 100,
+      trailingComma: 'all',
+      bracketSpacing: true,
+      arrowParens: 'always',
+    }).then((formatted) => {
+      if (active) setContent(addReadableTypeScriptSpacing(formatted));
+    }).catch((reason) => {
+      if (active) {
+        setContent(rawContent);
+        setFormatError(reason instanceof Error ? reason.message : 'Prettier could not format this source.');
+      }
+    });
+    return () => { active = false; };
+  }, [rawContent, tile.text.language, formatRequest]);
   const diagnostics = [...(editState?.diagnostics ?? []), ...(editState?.renderDiagnostics ?? [])];
   if (!content) {
     return <><AstStatus editState={editState} /><pre ref={(element) => { textRefs.current[tile.id] = element; }}><code>No text representation for this target.</code></pre></>;
   }
   const lines = content.split('\n');
   const sourceStartLine = tile.text.sourceStartLine ?? 1;
-  return <><AstStatus editState={editState} /><pre ref={(element) => { textRefs.current[tile.id] = element; }}><code>{lines.map((line, index) => {
+  return <><AstStatus editState={editState} />{formatError && <div className="render-diagnostics">Prettier: {formatError}</div>}<pre ref={(element) => { textRefs.current[tile.id] = element; }}><code>{lines.map((line, index) => {
     const sourceLine = sourceStartLine + index;
     const matches = occurrencesForLine(tile.text.occurrences ?? [], focus, sourceLine);
     return <span className={matches.length > 0 ? 'source-line focused' : 'source-line'} data-focus-match={matches.length > 0 ? 'true' : undefined} key={`${tile.id}:${index}`}>{highlightSource(line, matches, sourceLine)}{index < lines.length - 1 ? '\n' : ''}</span>;
   })}</code></pre>{diagnostics.length > 0 && <div className="render-diagnostics">{diagnostics.map((diagnostic, index) => <div key={`${tile.id}:diagnostic:${index}`}>{diagnostic}</div>)}</div>}</>;
 }
 
+function addReadableTypeScriptSpacing(source: string): string {
+  const lines = source.split('\n');
+  const result: string[] = [];
+  let importBlock = true;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const topLevel = trimmed !== '' && !line.startsWith(' ') && !line.startsWith('\t');
+    const startsDeclaration = /^(const|let|var|function|class|interface|type|export)\b/.test(trimmed);
+    const startsTopLevelCall = /^[A-Za-z_$][\w$]*(?:\.|\s*\()/.test(trimmed) && !/^(if|for|while|switch|catch)\b/.test(trimmed);
+    const previous = result[result.length - 1]?.trim() ?? '';
+    const previousIsDeclaration = /^(const|let|var)\b/.test(previous);
+    const needsSectionBreak = topLevel && result.length > 0 && result[result.length - 1] !== '' && (
+      (importBlock && startsDeclaration) ||
+      (startsTopLevelCall && previousIsDeclaration) ||
+      (startsTopLevelCall && previous.endsWith('});'))
+    );
+    if (needsSectionBreak) {
+      result.push('');
+    }
+    if (topLevel && !trimmed.startsWith('import ')) {
+      importBlock = false;
+    }
+    result.push(line);
+  }
+  return result.join('\n');
+}
+
 function declarationContent(tile: Tile, editState?: FileEditState): string | undefined {
   const declaration = tile.overview.declarations?.[0];
-  const source = editState?.workingCode || tile.text.content;
+  const source = editState ? editState.workingCode : tile.text.content;
   if (!declaration || !source) return source;
   const lines = source.split('\n');
   const start = declarationStartLine(lines, declaration);
@@ -606,7 +833,7 @@ function highlightSource(line: string, occurrences: Occurrence[], sourceLine: nu
   return parts;
 }
 
-function Overview({ tile, row, editInquiries, edits, comparisonActive, completeFile, onCompleteFileChange, onApplyEdit, editsForPath, packageLens, fileLens, onLensChange, onPackage, onPackageColumn, onPackageLeft, onImport, onImportColumn, onImportLeft, onFile, onFileColumn, onFileLeft, onInspectDeclaration, onDeclaration, onDeclarationColumn, onDeclarationLeft, onInspectReference, onOpenReferenceLeft, onOpenReferenceColumn }: Omit<RowProps, 'onTogglePane' | 'onToggleTile' | 'onCloseColumn' | 'onCloseTile' | 'onBack' | 'focus' | 'textRefs' | 'onInspectFile' | 'onInspectReference' | 'onOpenReferenceLeft' | 'onOpenReferenceColumn' | 'editsFor' | 'editsForPath' | 'packageLens' | 'fileLens' | 'comparisonActive' | 'completeFileByTile' | 'onCompleteFileChange' | 'comparisonRows' | 'onApplyEdit' | 'editInquiries'> & { tile: Tile; editInquiries: EditInquiry[]; edits: EditSummary[]; comparisonActive: boolean; completeFile: boolean; onCompleteFileChange: (value: boolean) => void; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary, fullLine?: boolean) => void; editsForPath: (packageDirectory: string, packageName: string, filePath: string) => EditSummary[]; packageLens: PackageLens; fileLens: FileLens; onInspectReference: (row: InquiryRow, tile: Tile, reference: Reference) => void; onOpenReferenceLeft: (row: InquiryRow, tile: Tile, reference: Reference) => void; onOpenReferenceColumn: (row: InquiryRow, tile: Tile, reference: Reference) => void }) {
+function Overview({ tile, row, editInquiries, edits, comparisonActive, completeFile, onCompleteFileChange, onApplyEdit, onOpenComparisonFile, editsForPath, packageLens, fileLens, onLensChange, onPackage, onPackageColumn, onPackageLeft, onImport, onImportColumn, onImportLeft, onFile, onFileColumn, onFileLeft, onInspectDeclaration, onDeclaration, onDeclarationColumn, onDeclarationLeft, onInspectReference, onOpenReferenceLeft, onOpenReferenceColumn }: Omit<RowProps, 'onTogglePane' | 'onToggleTile' | 'onCloseColumn' | 'onCloseTile' | 'onBack' | 'focus' | 'textRefs' | 'onInspectFile' | 'onInspectReference' | 'onOpenReferenceLeft' | 'onOpenReferenceColumn' | 'editsFor' | 'editsForPath' | 'packageLens' | 'fileLens' | 'comparisonActive' | 'comparisonPreview' | 'completeFileByTile' | 'onCompleteFileChange' | 'comparisonRows' | 'onApplyEdit' | 'onOpenComparisonFile' | 'editInquiries'> & { tile: Tile; editInquiries: EditInquiry[]; edits: EditSummary[]; comparisonActive: boolean; completeFile: boolean; onCompleteFileChange: (value: boolean) => void; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary, fullLine?: boolean) => void; onOpenComparisonFile: (file: ComparisonFile) => void; editsForPath: (packageDirectory: string, packageName: string, filePath: string) => EditSummary[]; packageLens: PackageLens; fileLens: FileLens; onInspectReference: (row: InquiryRow, tile: Tile, reference: Reference) => void; onOpenReferenceLeft: (row: InquiryRow, tile: Tile, reference: Reference) => void; onOpenReferenceColumn: (row: InquiryRow, tile: Tile, reference: Reference) => void }) {
   const overview = tile.overview;
   const [showReferences, setShowReferences] = useState(false);
   const declarationsFor = (file: File): Declaration[] => file.declarations ?? [];
@@ -623,17 +850,21 @@ function Overview({ tile, row, editInquiries, edits, comparisonActive, completeF
     if (!declaration.exported) return [];
     return [{ declaration, child: false }, ...(declaration.children ?? []).filter((child) => child.exported).map((child) => ({ declaration: child, child: true }))];
   });
+  const packageInternalRows = (file: File): Array<{ declaration: Declaration; child: boolean }> => declarationsFor(file).flatMap((declaration) => {
+    if (declaration.exported) return [];
+    return [{ declaration, child: false }, ...(declaration.children ?? []).filter((child) => !child.exported).map((child) => ({ declaration: child, child: true }))];
+  });
   const editDeclaration = overview.selectedDeclaration ?? (tile.target.kind === 'declaration' ? overview.declarations?.[0] : undefined);
   const openedDeclarations = row.tiles.filter((candidate) => candidate.id !== tile.id && candidate.target.kind === 'declaration' && candidate.target.packagePath === tile.target.packagePath && candidate.target.packageName === tile.target.packageName && candidate.target.filePath === tile.target.filePath).flatMap((candidate) => candidate.overview.declarations ?? []);
   const visibleComparisonEdits = tile.target.kind === 'file' ? edits.filter((edit) => !openedDeclarations.some((declaration) => editBelongsToDeclaration(edit, declaration))) : edits;
   return <div className="overview-content"><h2>{overview.title}</h2>{overview.subtitle && <p className="subtitle">{overview.subtitle}</p>}
-     {tile.target.kind === 'package' && <LensControls value={packageLens} options={[['files', 'Files'], ['api', 'Exported API']]} onChange={(value) => onLensChange(tile, value as PackageLens)} />}
+      {tile.target.kind === 'package' && <LensControls value={packageLens} options={[['files', 'Files'], ['api', 'Exported API'], ['internal', 'Internal API']]} onChange={(value) => onLensChange(tile, value as PackageLens)} />}
      {tile.target.kind === 'file' && <LensControls value={fileLens} options={[['all', 'All'], ['exported', 'Exported'], ['internal', 'Internal']]} onChange={(value) => onLensChange(tile, value as FileLens)} />}
      {tile.target.kind === 'package' && <ChangedFilesSection tile={tile} row={row} editsForPath={editsForPath} onFile={onFile} onFileLeft={onFileLeft} onFileColumn={onFileColumn} />}
-     {overview.packages?.map((pkg) => <TargetButton key={`${pkg.directory}:${pkg.name}`} label={`package ${pkg.name}`} detail={`${pkg.directory || 'root package'} · ${pkg.fileCount} files`} canOpenLeft={tile.column > 0} onOpen={() => onPackage(row, tile, pkg)} onOpenLeft={() => onPackageLeft(row, tile, pkg)} onOpenColumn={() => onPackageColumn(row, tile, pkg)} />)}
-     {tile.target.kind === 'program' && editInquiries.length > 0 && <StructuralEditsSection inquiries={editInquiries} onApplyEdit={onApplyEdit} onOpenDeclaration={(file, declaration) => onDeclarationColumn(row, tile, file, declaration)} />}
+      {overview.packages?.map((pkg) => <TargetButton key={`${pkg.directory}:${pkg.name}`} label={`${pkg.kind === 'folder' ? 'folder' : pkg.kind === 'project' ? 'project' : 'package'} ${pkg.name}`} detail={`${pkg.directory || 'project root'} · ${pkg.fileCount} files`} canOpenLeft={tile.column > 0} onOpen={() => onPackage(row, tile, pkg)} onOpenLeft={() => onPackageLeft(row, tile, pkg)} onOpenColumn={() => onPackageColumn(row, tile, pkg)} />)}
+      {tile.target.kind === 'program' && editInquiries.length > 0 && <StructuralEditsSection inquiries={editInquiries} onApplyEdit={onApplyEdit} onOpenComparisonFile={onOpenComparisonFile} onOpenDeclaration={(file, declaration) => onDeclarationColumn(row, tile, file, declaration)} />}
      {tile.target.kind === 'package' && packageLens === 'files' && overview.files?.map((file) => <TargetButton key={file.path} label={file.name} detail={file.path} canOpenLeft={tile.column > 0} onOpen={() => onFile(row, tile, file)} onOpenLeft={() => onFileLeft(row, tile, file)} onOpenColumn={() => onFileColumn(row, tile, file)} />)}
-      {tile.target.kind === 'package' && packageLens === 'api' && overview.files?.flatMap((file) => packageApiRows(file).map(({ declaration, child }) => <TargetButton key={`${file.path}:${declaration.symbolId ?? declaration.name}:${declaration.line}`} label={`${child ? '↳ ' : ''}${declaration.kind} ${declaration.name}`} detail={`${file.name} · ${declarationSignature(declaration)} · line ${declaration.line}`} canOpenLeft={tile.column > 0} onOpen={() => onInspectDeclaration(row, tile, file.path, declaration)} onOpenLeft={() => onDeclarationLeft(row, tile, file.path, declaration)} onOpenColumn={() => onDeclarationColumn(row, tile, file.path, declaration)} />))}
+      {tile.target.kind === 'package' && (packageLens === 'api' || packageLens === 'internal') && overview.files?.flatMap((file) => (packageLens === 'api' ? packageApiRows(file) : packageInternalRows(file)).map(({ declaration, child }) => <TargetButton key={`${file.path}:${declaration.symbolId ?? declaration.name}:${declaration.line}`} label={`${child ? '↳ ' : ''}${declaration.kind} ${declaration.name}`} detail={`${file.name} · ${declarationSignature(declaration)} · line ${declaration.line}`} canOpenLeft={tile.column > 0} onOpen={() => onInspectDeclaration(row, tile, file.path, declaration)} onOpenLeft={() => onDeclarationLeft(row, tile, file.path, declaration)} onOpenColumn={() => onDeclarationColumn(row, tile, file.path, declaration)} />))}
     {overview.importPaths && overview.importPaths.length > 0 && <section className="overview-section"><h3>Imports</h3>{overview.importPaths.map((path) => {
       const imported = overview.imports?.find((candidate) => candidate.path === path);
       if (!imported) {
@@ -650,16 +881,16 @@ function Overview({ tile, row, editInquiries, edits, comparisonActive, completeF
     </div>;
 }
 
-function StructuralEditsSection({ inquiries, onApplyEdit, onOpenDeclaration }: { inquiries: EditInquiry[]; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary, fullLine?: boolean) => void; onOpenDeclaration: (file: string, declaration: Declaration) => void }) {
+function StructuralEditsSection({ inquiries, onApplyEdit, onOpenComparisonFile, onOpenDeclaration }: { inquiries: EditInquiry[]; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary, fullLine?: boolean) => void; onOpenComparisonFile: (file: ComparisonFile) => void; onOpenDeclaration: (file: string, declaration: Declaration) => void }) {
   const editCount = inquiries.reduce((count, inquiry) => count + inquiry.columns.reduce((columnCount, column) => columnCount + column[0].edits.length, 0), 0);
-  return <section className="overview-section edit-section comparison-results structural-edits"><div className="comparison-tree-heading"><div><h3>Structural edits ({editCount})</h3><p>Revision changes in the Program inquiry.</p></div><span className="comparison-scope">Tree</span></div><div className="comparison-tree">{inquiries.flatMap((inquiry) => inquiry.columns.map((column, index) => <StructuralEditGroup key={`${inquiry.id}:${index}`} inquiry={inquiry} file={column[0]} index={index} onApplyEdit={onApplyEdit} onOpenDeclaration={onOpenDeclaration} />))}</div></section>;
+  return <section className="overview-section edit-section comparison-results structural-edits"><div className="comparison-tree-heading"><div><h3>Structural edits ({editCount})</h3><p>Revision changes in the Program inquiry.</p></div><span className="comparison-scope">Tree</span></div><div className="comparison-tree">{inquiries.flatMap((inquiry) => inquiry.columns.map((column, index) => <StructuralEditGroup key={`${inquiry.id}:${index}`} inquiry={inquiry} file={column[0]} index={index} onApplyEdit={onApplyEdit} onOpenComparisonFile={onOpenComparisonFile} onOpenDeclaration={onOpenDeclaration} />))}</div></section>;
 }
 
-function StructuralEditGroup({ inquiry, file, index, onApplyEdit, onOpenDeclaration }: { inquiry: EditInquiry; file: ComparisonFile; index: number; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary, fullLine?: boolean) => void; onOpenDeclaration: (file: string, declaration: Declaration) => void }) {
+function StructuralEditGroup({ inquiry, file, index, onApplyEdit, onOpenComparisonFile, onOpenDeclaration }: { inquiry: EditInquiry; file: ComparisonFile; index: number; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary, fullLine?: boolean) => void; onOpenComparisonFile: (file: ComparisonFile) => void; onOpenDeclaration: (file: string, declaration: Declaration) => void }) {
   const [expanded, setExpanded] = useState(Boolean(inquiry.declaration));
   const tree = buildComparisonTree(file.edits);
   const label = `${inquiry.title}${inquiry.columns.length > 1 ? ` · branch ${index + 1}` : ''}`;
-  return <div className="structural-edit-group"><div className="structural-edit-label"><button type="button" className="structural-edit-toggle" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>{expanded ? '−' : '+'}</button>{inquiry.declaration ? <button type="button" className="structural-edit-open" onClick={() => onOpenDeclaration(file.path, inquiry.declaration)}>{label}</button> : <span>{label}</span>}<span>{file.path}</span></div>{expanded && tree.map((node) => <ComparisonTreeNodeView key={`${inquiry.id}:${index}:${node.id}`} node={node} depth={0} packageDirectory={file.packageDirectory} packageName={file.packageName} file={file.path} onApplyEdit={onApplyEdit} />)}</div>;
+  return <div className="structural-edit-group"><div className="structural-edit-label"><button type="button" className="structural-edit-toggle" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>{expanded ? '−' : '+'}</button>{inquiry.declaration ? <button type="button" className="structural-edit-open" onClick={() => onOpenDeclaration(file.path, inquiry.declaration)}>{label}</button> : <span>{label}</span>}<span>{file.path}</span></div><button type="button" className="open-inquiry-button file-inquiry-button" onClick={() => onOpenComparisonFile(file)}>Open in new inquiry</button>{expanded && tree.map((node) => <ComparisonTreeNodeView key={`${inquiry.id}:${index}:${node.id}`} node={node} depth={0} packageDirectory={file.packageDirectory} packageName={file.packageName} file={file.path} onApplyEdit={onApplyEdit} />)}</div>;
 }
 
 function ComparisonTreeSection({ tile, edits, excludedDeclarations, completeFile, onCompleteFileChange, onApplyEdit, onOpenDeclaration, onOpenDeclarationLeft }: { tile: Tile; edits: EditSummary[]; excludedDeclarations: Declaration[]; completeFile: boolean; onCompleteFileChange: (value: boolean) => void; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary, fullLine?: boolean) => void; onOpenDeclaration: (declaration: Declaration) => void; onOpenDeclarationLeft: (declaration: Declaration) => void }) {
@@ -671,7 +902,7 @@ function ComparisonTreeSection({ tile, edits, excludedDeclarations, completeFile
 }
 
 function ComparisonTreeNodeView({ node, depth, packageDirectory, packageName, file, onApplyEdit }: { node: ComparisonTreeNode; depth: number; packageDirectory: string; packageName: string; file: string; onApplyEdit: (packageDirectory: string, packageName: string, file: string, edit: EditSummary, fullLine?: boolean) => void }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(depth < 3);
   const edit = node.edit;
   const fullLineAction = edit && node.children.length > 0
     ? edit.status === 'applied' || edit.status === 'prepared' ? 'Remove full line' : 'Apply full line'

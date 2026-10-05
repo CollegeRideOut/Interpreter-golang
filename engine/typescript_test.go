@@ -65,6 +65,59 @@ func TestParseTypeScriptSupportsCommonSyntax(t *testing.T) {
 			t.Errorf("parsed tree does not contain %q", want)
 		}
 	}
+	rendered := engine.RenderBestEffort(root).Code
+	if !strings.Contains(rendered, "import { readFile } from \"node:fs/promises\";") || !strings.Contains(rendered, "export class Greeter {") {
+		t.Fatalf("TypeScript formatting lost structure: %q", rendered)
+	}
+}
+
+func TestParseTSXBuildsEditableTree(t *testing.T) {
+	root, err := engine.ParseTSX([]byte("export function App() { return <main>Hello</main>; }\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root.Kind != "tsx:program" || root.Language != "tsx" {
+		t.Fatalf("TSX root = kind %q, language %q", root.Kind, root.Language)
+	}
+	if got := engine.RenderBestEffort(root).Code; got != "export function App() {\n  return <main>Hello</main>;\n}\n" {
+		t.Fatalf("rendered TSX = %q", got)
+	}
+}
+
+func TestTSXFormattingKeepsInlineTypeObjects(t *testing.T) {
+	root, err := engine.ParseTSX([]byte("function App(){const [status,setStatus]=useState('Checking API...');useEffect(()=>{fetch('/api/health').then((response)=>response.json() as Promise<{status:string}>).then((data)=>setStatus(data.status));},[]);return <main><h1>Narativo</h1><p>A minimal React and Express starter.</p><small>Server: {status}</small></main>}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered := engine.RenderBestEffort(root).Code
+	if !strings.Contains(rendered, "Promise<{ status: string }>") || !strings.Contains(rendered, "  return <main>") {
+		t.Fatalf("poorly formatted TSX: %q", rendered)
+	}
+}
+
+func TestTSXFormattingSeparatesOptionalSemicolonStatements(t *testing.T) {
+	root, err := engine.ParseTSX([]byte("function App(){const [status,setStatus]=useState('Checking API...')\nuseEffect(()=>{setStatus('ready')},[])\nreturn <main>{status}</main>}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered := engine.RenderBestEffort(root).Code
+	if !strings.Contains(rendered, "useState('Checking API...');\n  useEffect") {
+		t.Fatalf("rendered statements were not separated: %q", rendered)
+	}
+	if !strings.Contains(rendered, "}, []);\n  return <main>") {
+		t.Fatalf("rendered return statement was not separated: %q", rendered)
+	}
+}
+
+func TestTSXFormattingSeparatesStatementsInsideCallbackArguments(t *testing.T) {
+	root, err := engine.ParseTSX([]byte("app.get('/api/health', async (_request, response) => { await db.selectNoFrom(({ val }) => val(1).as('ok')).execute()\nresponse.json({ status: 'ok' }) })\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered := engine.RenderBestEffort(root).Code
+	if !strings.Contains(rendered, ".execute();\n  response.json") {
+		t.Fatalf("nested callback statements were not separated: %q", rendered)
+	}
 }
 
 func TestTypeScriptDiffLanguageDispatch(t *testing.T) {
@@ -172,7 +225,62 @@ func TestHTMLDiffAndApply(t *testing.T) {
 			t.Fatalf("apply edit %d: %v", index, err)
 		}
 	}
-	if got := strings.TrimSpace(state.Snapshot().RenderedCode); got != strings.TrimSpace(string(target)) {
-		t.Fatalf("applied HTML = %q, want %q", got, strings.TrimSpace(string(target)))
+	want := "<main>\n  <h1>Welcome</h1>\n</main>"
+	if got := strings.TrimSpace(state.Snapshot().RenderedCode); got != want {
+		t.Fatalf("applied HTML = %q, want %q", got, want)
+	}
+}
+
+func TestHTMLInsertionsApplyFromEmptySource(t *testing.T) {
+	state, err := engine.NewWorkingStateFromLanguage("html", nil, []byte("<html><body><div id=\"root\"></div></body></html>\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range state.Snapshot().Edits {
+		if err := state.Apply(index); err != nil {
+			t.Fatalf("apply HTML edit %d: %v", index, err)
+		}
+	}
+	want := "<html>\n  <body>\n    <div id=\"root\"></div>\n  </body>\n</html>"
+	if got := strings.TrimSpace(state.Snapshot().RenderedCode); got != want {
+		t.Fatalf("applied HTML insertions = %q", got)
+	}
+}
+
+func TestHTMLSubtreeRemovalSurvivesAppliedParent(t *testing.T) {
+	target := []byte("<html lang=\"en\">\n  <head>\n    <title>Narativo</title>\n  </head>\n  <body>\n    <div id=\"root\"></div>\n  </body>\n</html>\n")
+	state, err := engine.NewWorkingStateFromLanguage("html", nil, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := state.Snapshot()
+	var parent, child *engine.Edit
+	for index := range snapshot.Edits {
+		edit := snapshot.Edits[index]
+		if edit.NodeKind == "html:element" && edit.Node != nil && edit.Node.StartLine == 1 {
+			copy := edit
+			parent = &copy
+		}
+		if edit.NodeKind == "html:element" && edit.Node != nil && edit.Node.StartLine == 2 && edit.Node.EndLine == 4 {
+			copy := edit
+			child = &copy
+		}
+	}
+	if parent == nil || child == nil {
+		t.Fatalf("could not find HTML parent and child edits")
+	}
+	if err := state.ApplyProjectedSubtree(parent.Index, engine.ApplyOptions{Reconcile: false}, engine.LiftOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.RemoveProjectedSubtree(child.Index, engine.LiftOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, node := range state.Snapshot().Root.Children {
+		if node.Kind == "html:element" && len(node.Children) == 0 {
+			t.Fatalf("expected remaining HTML body subtree")
+		}
+	}
+	if got := state.Snapshot().RenderedCode; strings.Contains(got, "<head>") {
+		t.Fatalf("removed HTML subtree remained rendered: %q", got)
 	}
 }

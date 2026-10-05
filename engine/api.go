@@ -28,6 +28,8 @@ func ParseLanguage(language string, source []byte) (*Node, error) {
 		return Parse(source)
 	case "typescript", "ts":
 		return ParseTypeScript(source)
+	case "tsx":
+		return ParseTSX(source)
 	case "html", "htm":
 		return ParseHTML(source)
 	default:
@@ -42,6 +44,8 @@ func DiffLanguage(language string, source, target []byte) (sourceTree, targetTre
 		return Diff(source, target)
 	case "typescript", "ts":
 		return DiffTypeScript(source, target)
+	case "tsx":
+		return DiffTSX(source, target)
 	case "html", "htm":
 		return DiffHTML(source, target)
 	default:

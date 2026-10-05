@@ -2,7 +2,9 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -64,6 +66,25 @@ func TestGetRevisionContextDoesNotUseAParentRepository(t *testing.T) {
 	}
 }
 
+func TestGetRevisionContextSupportsAnUnbornRepository(t *testing.T) {
+	app := NewApp()
+	root := t.TempDir()
+	command := exec.Command("git", "-C", root, "init", "-b", "main")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, output)
+	}
+	context, err := app.GetRevisionContext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if context.CurrentCommit != "" {
+		t.Fatalf("unborn repository commit = %q, want empty", context.CurrentCommit)
+	}
+	if len(context.Options) != 0 {
+		t.Fatalf("unborn repository options = %+v, want none", context.Options)
+	}
+}
+
 func TestSelectRevisionLoadsTheProgramCommitWithoutCheckout(t *testing.T) {
 	app := NewApp()
 	context, err := app.GetRevisionContext("../TestProgramCalorieApp")
@@ -76,6 +97,30 @@ func TestSelectRevisionLoadsTheProgramCommitWithoutCheckout(t *testing.T) {
 	}
 	if state.Program == nil || state.Program.Path == "" || len(state.Program.Packages) == 0 {
 		t.Fatalf("selected revision state = %+v", state)
+	}
+}
+
+func TestSelectRevisionSwapsSnapshotAfterLoadingReplacement(t *testing.T) {
+	app := NewApp()
+	context, err := app.GetRevisionContext("../TestProgramCalorieApp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.SelectRevision("../TestProgramCalorieApp", context.CurrentCommit); err != nil {
+		t.Fatal(err)
+	}
+	previousRoot := app.revisionRoot
+	if _, err := os.Stat(previousRoot); err != nil {
+		t.Fatalf("initial revision root: %v", err)
+	}
+	if _, err := app.SelectRevision("../TestProgramCalorieApp", context.CurrentCommit); err != nil {
+		t.Fatal(err)
+	}
+	if app.revisionRoot == previousRoot {
+		t.Fatal("revision root was not replaced")
+	}
+	if _, err := os.Stat(previousRoot); !os.IsNotExist(err) {
+		t.Fatalf("previous revision root still exists: %v", err)
 	}
 }
 
@@ -149,4 +194,44 @@ func TestComparisonStateKeepsCanonicalAndLiftedEdits(t *testing.T) {
 	if !foundEntertainment {
 		t.Fatal("canonical comparison edits omitted the entertainment assignment")
 	}
+}
+
+func TestComparisonSupportsFilesAddedAfterTheComparedCommit(t *testing.T) {
+	app := NewApp()
+	root := t.TempDir()
+	if output, err := runGit(root, "init", "-b", "main"); err != nil {
+		t.Fatalf("git init: %v\n%s", err, output)
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("initial\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := runGit(root, "add", "README.md"); err != nil {
+		t.Fatalf("git add: %v\n%s", err, output)
+	}
+	if output, err := runGit(root, "-c", "user.name=contuts-test", "-c", "user.email=contuts-test@example.com", "commit", "-m", "initial"); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, output)
+	}
+	commitOutput, err := runGit(root, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "server", "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "server", "src", "index.ts"), []byte("export const answer = 42;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := app.GetFileEditState(root, "working-tree", strings.TrimSpace(string(commitOutput)), "server/src", "src", "server/src/index.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Edits) == 0 {
+		t.Fatal("expected edits for a file added after the compared commit")
+	}
+}
+
+func runGit(directory string, arguments ...string) ([]byte, error) {
+	command := exec.Command("git", append([]string{"-C", directory}, arguments...)...)
+	return command.CombinedOutput()
 }

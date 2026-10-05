@@ -20,11 +20,15 @@ export function ApplyFileEditSubtree(arg1:string,arg2:string,arg3:string,arg4:st
 
 export function BackInquiry(arg1:string,arg2:string):Promise<workspace.State>;
 
+export function ChooseDirectory():Promise<string>;
+
 export function CloseInquiryColumn(arg1:string,arg2:string):Promise<workspace.State>;
 
 export function CloseInquiryTile(arg1:string,arg2:string):Promise<workspace.State>;
 
 export function ExplorePreviousCommitEdits(arg1:string):Promise<main.ProgramSnapshot>;
+
+export function GetComparisonFiles(arg1:string,arg2:string,arg3:string):Promise<Array<main.ComparisonFile>>;
 
 export function GetCurrentState():Promise<workspace.State>;
 
@@ -47,6 +51,8 @@ export function NavigateInquiryDeclaration(arg1:string,arg2:string,arg3:string,a
 export function NavigateInquiryFile(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<workspace.State>;
 
 export function NavigateInquiryPackage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<workspace.State>;
+
+export function OpenComparisonFile(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string):Promise<workspace.State>;
 
 export function OpenDeclaration(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:number):Promise<main.ProgramSnapshot>;
 
@@ -88,6 +94,8 @@ export function RemoveFileEdit(arg1:string,arg2:string,arg3:string,arg4:string,a
 
 export function RemoveFileEditSubtree(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:number):Promise<main.FileEditState>;
 
+export function ResizeOpenCode(arg1:number,arg2:number):Promise<void>;
+
 export function SelectRevision(arg1:string,arg2:string):Promise<workspace.State>;
 
 export function SetInquiryPane(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<workspace.State>;
@@ -95,3 +103,9 @@ export function SetInquiryPane(arg1:string,arg2:string,arg3:string,arg4:boolean)
 export function SetInquiryTileCollapsed(arg1:string,arg2:string,arg3:boolean):Promise<workspace.State>;
 
 export function StartInquiry(arg1:string):Promise<workspace.State>;
+
+export function StartOpenCode(arg1:string):Promise<void>;
+
+export function StopOpenCode():Promise<void>;
+
+export function WriteOpenCodeInput(arg1:string):Promise<void>;

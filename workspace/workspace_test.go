@@ -1,6 +1,12 @@
 package workspace
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"interpreter/explorer"
+)
 
 func TestInquiryRowsGrowIndependently(t *testing.T) {
 	workspace := New()
@@ -35,6 +41,62 @@ func TestInquiryRowsGrowIndependently(t *testing.T) {
 	}
 	if current.Revision != state.Revision || len(current.Rows) != 2 {
 		t.Fatalf("current state = %+v", current)
+	}
+}
+
+func TestOpenComparisonFileCreatesIndependentFileInquiry(t *testing.T) {
+	workspace := New()
+	state, err := workspace.OpenProgram("../TestProgram")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := explorer.File{Name: "main.tsx", Path: "src/main.tsx"}
+	state, err = workspace.OpenComparisonFile("src/main.tsx", "src", "", file, "export function App() {}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(state.Rows))
+	}
+	row := state.Rows[1]
+	if row.Title != "src/main.tsx" || row.Tiles[0].Target.Kind != "file" || row.Tiles[0].Text.Content == "" {
+		t.Fatalf("comparison inquiry = %+v", row)
+	}
+}
+
+func TestComparisonFileNavigationUsesActiveTileMetadata(t *testing.T) {
+	root := t.TempDir()
+	filePath := filepath.Join(root, "server", "src", "index.ts")
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filePath, []byte("const app = express();\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workspace := New()
+	state, err := workspace.OpenProgram(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := explorer.File{
+		Name:         "index.ts",
+		Path:         "server/src/index.ts",
+		Declarations: []explorer.Declaration{{Kind: "const", Name: "app", Line: 1, EndLine: 1}},
+	}
+	state, err = workspace.OpenComparisonFile(file.Path, "server/src", "src", file, "const app = express();\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := state.Rows[1]
+	if err := os.RemoveAll(workspace.programRoot); err != nil {
+		t.Fatal(err)
+	}
+	state, err = workspace.OpenDeclaration(row.ID, row.Tiles[0].ID, "server/src", "src", file.Path, "app", 1)
+	if err != nil {
+		t.Fatalf("open declaration from comparison file: %v", err)
+	}
+	if len(state.Rows[1].Tiles) != 2 || state.Rows[1].Tiles[1].Target.DeclarationName != "app" {
+		t.Fatalf("comparison navigation state = %+v", state.Rows[1])
 	}
 }
 
@@ -185,7 +247,7 @@ func TestDeclarationOverviewIncludesReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := state.Rows[0]
-    state, err = workspace.OpenDeclaration(row.ID, row.Tiles[0].ID, "controllers", "controllers", "controllers/calories.go", "CaloriesController", 5)
+	state, err = workspace.OpenDeclaration(row.ID, row.Tiles[0].ID, "controllers", "controllers", "controllers/calories.go", "CaloriesController", 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,5 +360,41 @@ func TestCurrentStateDoesNotShareNestedProgramData(t *testing.T) {
 	}
 	if current.Program.Packages[0].Files[0].Name == "changed outside workspace" {
 		t.Fatal("workspace state shares nested package data")
+	}
+}
+
+func TestOpenProgramSupportsTypeScriptProjects(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"name":"ticket-api"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "src", "main.ts"), []byte("export const main = true;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "src", "App.tsx"), []byte("export function App() { return <main />; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := New().OpenProgram(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Program.Packages) != 1 || state.Program.Packages[0].Name != "ticket-api" {
+		t.Fatalf("program = %+v", state.Program)
+	}
+	if len(state.Program.Packages[0].Children) != 1 || state.Program.Packages[0].Children[0].Name != "src" {
+		t.Fatalf("project tree = %+v", state.Program.Packages[0])
+	}
+	workspace := New()
+	opened, err := workspace.OpenProgram(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err = workspace.OpenPackage(opened.Rows[0].ID, opened.Rows[0].Tiles[0].ID, "src", "src")
+	if err != nil || len(state.Rows[0].Tiles) != 2 || len(state.Rows[0].Tiles[1].Overview.Files) != 2 {
+		t.Fatalf("opened folder = %+v, err = %v", state, err)
 	}
 }

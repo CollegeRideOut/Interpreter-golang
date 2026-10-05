@@ -204,6 +204,31 @@ func (w *Workspace) StartInquiry(title string) (State, error) {
 	return cloneState(w.state), nil
 }
 
+// OpenComparisonFile starts an independent inquiry for a file that may only
+// exist in one side of a revision comparison.
+func (w *Workspace) OpenComparisonFile(title, packageDirectory, packageName string, file explorer.File, source string) (State, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.state.Program == nil {
+		return State{}, fmt.Errorf("no program is open")
+	}
+	if strings.TrimSpace(title) == "" {
+		title = file.Path
+	}
+	rowID := w.id("row")
+	tileID := w.id("tile")
+	w.state.Rows = append(w.state.Rows, InquiryRow{ID: rowID, Title: title, Tiles: []Tile{{
+		ID:       tileID,
+		Column:   0,
+		Target:   Target{Kind: "file", PackagePath: packageDirectory, PackageName: packageName, FilePath: file.Path},
+		Overview: Overview{Kind: "file", Title: file.Name, Subtitle: file.Path, Declarations: file.Declarations, ImportPaths: file.Imports},
+		Text:     textViewForFile(file, source),
+	}}})
+	w.state.Active = Selection{RowID: rowID, TileID: tileID}
+	w.bump()
+	return cloneState(w.state), nil
+}
+
 func (w *Workspace) OpenPackage(rowID, tileID, packageDirectory, packageName string) (State, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -211,7 +236,7 @@ func (w *Workspace) OpenPackage(rowID, tileID, packageDirectory, packageName str
 	if err != nil {
 		return State{}, err
 	}
-	return w.appendTileLocked(rowID, tileID, "package", "opens package", Target{Kind: "package", PackagePath: packageDirectory, PackageName: packageName}, Overview{Kind: "package", Title: "package " + packageName, Subtitle: packageDirectory, Files: pkg.Files}, TextView{Language: "go", Filename: packageDirectory})
+	return w.appendTileLocked(rowID, tileID, "package", "opens package", Target{Kind: "package", PackagePath: packageDirectory, PackageName: packageName}, packageOverview(pkg), TextView{Language: "text", Filename: packageDirectory})
 }
 
 // NavigatePackage replaces the current tile with a package in the same
@@ -223,7 +248,7 @@ func (w *Workspace) NavigatePackage(rowID, tileID, packageDirectory, packageName
 	if err != nil {
 		return State{}, err
 	}
-	return w.replaceTileLocked(rowID, tileID, Target{Kind: "package", PackagePath: packageDirectory, PackageName: packageName}, Overview{Kind: "package", Title: "package " + packageName, Subtitle: packageDirectory, Files: pkg.Files}, TextView{Language: "go", Filename: packageDirectory})
+	return w.replaceTileLocked(rowID, tileID, Target{Kind: "package", PackagePath: packageDirectory, PackageName: packageName}, packageOverview(pkg), TextView{Language: "text", Filename: packageDirectory})
 }
 
 // InspectFile loads a file into the current tile's text pane without changing
@@ -231,7 +256,7 @@ func (w *Workspace) NavigatePackage(rowID, tileID, packageDirectory, packageName
 func (w *Workspace) InspectFile(rowID, tileID, packageDirectory, packageName, filePath string) (State, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	pkg, err := w.packageLocked(packageDirectory, packageName)
+	pkg, err := w.packageForFileLocked(rowID, tileID, packageDirectory, packageName, filePath)
 	if err != nil {
 		return State{}, err
 	}
@@ -239,7 +264,7 @@ func (w *Workspace) InspectFile(rowID, tileID, packageDirectory, packageName, fi
 		if file.Path != filePath {
 			continue
 		}
-		source, readErr := os.ReadFile(filepath.Join(w.programRoot, filepath.FromSlash(file.Path)))
+		source, readErr := w.sourceForFileLocked(rowID, tileID, file.Path)
 		if readErr != nil {
 			return State{}, readErr
 		}
@@ -263,7 +288,7 @@ func (w *Workspace) InspectFile(rowID, tileID, packageDirectory, packageName, fi
 func (w *Workspace) InspectDeclaration(rowID, tileID, packageDirectory, packageName, filePath, name string, line int) (State, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	pkg, err := w.packageLocked(packageDirectory, packageName)
+	pkg, err := w.packageForFileLocked(rowID, tileID, packageDirectory, packageName, filePath)
 	if err != nil {
 		return State{}, err
 	}
@@ -275,7 +300,7 @@ func (w *Workspace) InspectDeclaration(rowID, tileID, packageDirectory, packageN
 		if declaration == nil {
 			return State{}, fmt.Errorf("declaration %s was not found in %s", name, filePath)
 		}
-		source, readErr := os.ReadFile(filepath.Join(w.programRoot, filepath.FromSlash(file.Path)))
+		source, readErr := w.sourceForFileLocked(rowID, tileID, file.Path)
 		if readErr != nil {
 			return State{}, readErr
 		}
@@ -297,7 +322,7 @@ func (w *Workspace) InspectDeclaration(rowID, tileID, packageDirectory, packageN
 func (w *Workspace) OpenFile(rowID, tileID, packageDirectory, packageName, filePath string) (State, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	pkg, err := w.packageLocked(packageDirectory, packageName)
+	pkg, err := w.packageForFileLocked(rowID, tileID, packageDirectory, packageName, filePath)
 	if err != nil {
 		return State{}, err
 	}
@@ -305,7 +330,7 @@ func (w *Workspace) OpenFile(rowID, tileID, packageDirectory, packageName, fileP
 		if file.Path != filePath {
 			continue
 		}
-		source, readErr := os.ReadFile(filepath.Join(w.programRoot, filepath.FromSlash(file.Path)))
+		source, readErr := w.sourceForFileLocked(rowID, tileID, file.Path)
 		if readErr != nil {
 			return State{}, readErr
 		}
@@ -319,7 +344,7 @@ func (w *Workspace) OpenFile(rowID, tileID, packageDirectory, packageName, fileP
 func (w *Workspace) NavigateFile(rowID, tileID, packageDirectory, packageName, filePath string) (State, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	pkg, err := w.packageLocked(packageDirectory, packageName)
+	pkg, err := w.packageForFileLocked(rowID, tileID, packageDirectory, packageName, filePath)
 	if err != nil {
 		return State{}, err
 	}
@@ -327,7 +352,7 @@ func (w *Workspace) NavigateFile(rowID, tileID, packageDirectory, packageName, f
 		if file.Path != filePath {
 			continue
 		}
-		source, readErr := os.ReadFile(filepath.Join(w.programRoot, filepath.FromSlash(file.Path)))
+		source, readErr := w.sourceForFileLocked(rowID, tileID, file.Path)
 		if readErr != nil {
 			return State{}, readErr
 		}
@@ -340,7 +365,7 @@ func (w *Workspace) NavigateFile(rowID, tileID, packageDirectory, packageName, f
 func (w *Workspace) OpenDeclaration(rowID, tileID, packageDirectory, packageName, filePath, name string, line int) (State, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	pkg, err := w.packageLocked(packageDirectory, packageName)
+	pkg, err := w.packageForFileLocked(rowID, tileID, packageDirectory, packageName, filePath)
 	if err != nil {
 		return State{}, err
 	}
@@ -352,7 +377,7 @@ func (w *Workspace) OpenDeclaration(rowID, tileID, packageDirectory, packageName
 		if declaration == nil {
 			return State{}, fmt.Errorf("declaration %s was not found in %s", name, filePath)
 		}
-		source, readErr := os.ReadFile(filepath.Join(w.programRoot, filepath.FromSlash(file.Path)))
+		source, readErr := w.sourceForFileLocked(rowID, tileID, file.Path)
 		if readErr != nil {
 			return State{}, readErr
 		}
@@ -378,7 +403,7 @@ func (w *Workspace) OpenDeclaration(rowID, tileID, packageDirectory, packageName
 func (w *Workspace) OpenDeclarationLeft(rowID, tileID, packageDirectory, packageName, filePath, name string, line int) (State, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	pkg, err := w.packageLocked(packageDirectory, packageName)
+	pkg, err := w.packageForFileLocked(rowID, tileID, packageDirectory, packageName, filePath)
 	if err != nil {
 		return State{}, err
 	}
@@ -390,7 +415,7 @@ func (w *Workspace) OpenDeclarationLeft(rowID, tileID, packageDirectory, package
 		if declaration == nil {
 			return State{}, fmt.Errorf("declaration %s was not found in %s", name, filePath)
 		}
-		source, readErr := os.ReadFile(filepath.Join(w.programRoot, filepath.FromSlash(file.Path)))
+		source, readErr := w.sourceForFileLocked(rowID, tileID, file.Path)
 		if readErr != nil {
 			return State{}, readErr
 		}
@@ -418,7 +443,7 @@ func (w *Workspace) OpenDeclarationLeft(rowID, tileID, packageDirectory, package
 func (w *Workspace) NavigateDeclaration(rowID, tileID, packageDirectory, packageName, filePath, name string, line int) (State, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	pkg, err := w.packageLocked(packageDirectory, packageName)
+	pkg, err := w.packageForFileLocked(rowID, tileID, packageDirectory, packageName, filePath)
 	if err != nil {
 		return State{}, err
 	}
@@ -430,7 +455,7 @@ func (w *Workspace) NavigateDeclaration(rowID, tileID, packageDirectory, package
 		if declaration == nil {
 			return State{}, fmt.Errorf("declaration %s was not found in %s", name, filePath)
 		}
-		source, readErr := os.ReadFile(filepath.Join(w.programRoot, filepath.FromSlash(file.Path)))
+		source, readErr := w.sourceForFileLocked(rowID, tileID, file.Path)
 		if readErr != nil {
 			return State{}, readErr
 		}
@@ -591,12 +616,65 @@ func (w *Workspace) packageLocked(directory, name string) (explorer.Package, err
 	if w.state.Program == nil {
 		return explorer.Package{}, fmt.Errorf("no program is open")
 	}
-	for _, pkg := range w.state.Program.Packages {
-		if pkg.Directory == directory && pkg.Name == name {
-			return pkg, nil
+	var search func([]explorer.Package) (explorer.Package, bool)
+	search = func(packages []explorer.Package) (explorer.Package, bool) {
+		for _, pkg := range packages {
+			if pkg.Directory == directory && pkg.Name == name {
+				return pkg, true
+			}
+			if found, ok := search(pkg.Children); ok {
+				return found, true
+			}
 		}
+		return explorer.Package{}, false
+	}
+	if pkg, ok := search(w.state.Program.Packages); ok {
+		return pkg, nil
 	}
 	return explorer.Package{}, fmt.Errorf("package %s in %s was not found", name, directory)
+}
+
+// packageForFileLocked falls back to the active file tile for comparison-only
+// files. Those files can exist in a revision snapshot without being present in
+// the program package tree used by ordinary workspace navigation.
+func (w *Workspace) packageForFileLocked(rowID, tileID, directory, name, filePath string) (explorer.Package, error) {
+	pkg, err := w.packageLocked(directory, name)
+	if err == nil {
+		return pkg, nil
+	}
+	_, tile, tileErr := w.tileLocked(rowID, tileID)
+	if tileErr != nil || tile.Target.FilePath != filePath || tile.Target.PackagePath != directory || tile.Target.PackageName != name {
+		return explorer.Package{}, err
+	}
+	for _, file := range tile.Overview.Files {
+		if file.Path == filePath {
+			return explorer.Package{Directory: directory, Name: name, Files: []explorer.File{file}}, nil
+		}
+	}
+	return explorer.Package{Directory: directory, Name: name, Files: []explorer.File{{
+		Name:         filepath.Base(filePath),
+		Path:         filePath,
+		Declarations: tile.Overview.Declarations,
+		Imports:      tile.Overview.ImportPaths,
+	}}}, nil
+}
+
+func (w *Workspace) sourceForFileLocked(rowID, tileID, filePath string) ([]byte, error) {
+	_, tile, err := w.tileLocked(rowID, tileID)
+	if err == nil && tile.Target.Kind == "file" && tile.Target.FilePath == filePath {
+		return []byte(tile.Text.Content), nil
+	}
+	return os.ReadFile(filepath.Join(w.programRoot, filepath.FromSlash(filePath)))
+}
+
+func packageOverview(pkg explorer.Package) Overview {
+	title := "package " + pkg.Name
+	if pkg.Kind == "project" {
+		title = pkg.Name
+	} else if pkg.Kind == "folder" {
+		title = "folder " + pkg.Name
+	}
+	return Overview{Kind: "package", Title: title, Subtitle: pkg.Directory, Files: pkg.Files, Packages: pkg.Children}
 }
 
 func (w *Workspace) appendTileLocked(rowID, fromTileID, kind, relation string, target Target, overview Overview, text TextView) (State, error) {
@@ -802,7 +880,7 @@ func localImportSummaries(root string, file explorer.File, packages []explorer.P
 }
 
 func textViewForFile(file explorer.File, source string) TextView {
-	return TextView{Language: "go", Filename: file.Path, Content: source, SourceStartLine: 1, Occurrences: append([]explorer.Occurrence(nil), file.Occurrences...)}
+	return TextView{Language: languageForPath(file.Path), Filename: file.Path, Content: source, SourceStartLine: 1, Occurrences: append([]explorer.Occurrence(nil), file.Occurrences...)}
 }
 
 func textViewForDeclaration(file explorer.File, declaration *explorer.Declaration, source string) TextView {
@@ -814,7 +892,20 @@ func textViewForDeclaration(file explorer.File, declaration *explorer.Declaratio
 			}
 		}
 	}
-	return TextView{Language: "go", Filename: file.Path, Content: source, SourceStartLine: declaration.Line, Occurrences: occurrences}
+	return TextView{Language: languageForPath(file.Path), Filename: file.Path, Content: source, SourceStartLine: declaration.Line, Occurrences: occurrences}
+}
+
+func languageForPath(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".ts":
+		return "typescript"
+	case ".tsx":
+		return "tsx"
+	case ".html", ".htm":
+		return "html"
+	default:
+		return "go"
+	}
 }
 
 func cloneState(state State) State {
@@ -883,6 +974,7 @@ func clonePackages(packages []explorer.Package) []explorer.Package {
 			clone[index].Files[fileIndex].SamePackageReferences = append([]explorer.Reference(nil), file.SamePackageReferences...)
 		}
 		clone[index].LocalImports = append([]string(nil), pkg.LocalImports...)
+		clone[index].Children = clonePackages(pkg.Children)
 	}
 	return clone
 }

@@ -16,13 +16,24 @@ function fakeEngine(initialState?: HeadlessState, fileEdits: EditSummary[] = [{ 
     getCurrentState: result,
     getRevisionContext: async () => ({ branch: 'main', currentCommit: 'abc1234', options: [{ kind: 'branch', ref: 'main', hash: 'abc1234', shortHash: 'abc1234', date: '2026-09-14T13:29:59-04:00', subject: 'latest change' }] }),
     openProgram: result,
+    chooseDirectory: async () => '/tmp/selected-program',
+    startOpenCode: async () => undefined,
+    writeOpenCodeInput: async () => undefined,
+    resizeOpenCode: async () => undefined,
+    stopOpenCode: async () => undefined,
     selectRevision: result,
     getFileEdits: async () => fileEdits,
     getFileEditState: async () => fileEditState(),
+    getComparisonFiles: async () => [],
     applyFileEdit: async () => fileEditState('applied'),
     applyFileEditSubtree: async () => fileEditState('applied'),
     removeFileEdit: async () => fileEditState('removed'),
     removeFileEditSubtree: async () => fileEditState('removed'),
+    openComparisonFile: async (_directory, _currentRevision, _compareRevision, packageDirectory, packageName, filePath) => {
+      const tileID = 'comparison-tile';
+      state = { ...state, rows: [...state.rows, { id: 'comparison-row', title: filePath, tiles: [{ id: tileID, column: 0, target: { kind: 'file', packagePath: packageDirectory, packageName, filePath }, overview: { kind: 'file', title: filePath, declarations: [] }, text: {}, panes: { overviewCollapsed: false, textCollapsed: false } }] }], active: { rowId: 'comparison-row', tileId: tileID } };
+      return state;
+    },
     startInquiry: async () => {
       state = { ...state, revision: state.revision + 1, rows: [...state.rows, { id: 'row-2', title: 'New inquiry', tiles: state.rows[0].tiles.slice(0, 1) }] };
       return state;
@@ -55,8 +66,17 @@ describe('App', () => {
     render(<App />);
 
     expect(screen.getByLabelText('Directory')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Choose folder' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Explore program' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Contuts hello' })).toBeInTheDocument();
+  });
+
+  it('puts the selected folder in the directory field', async () => {
+    render(<App providedEngine={fakeEngine()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
+
+    await waitFor(() => expect(screen.getByLabelText('Directory')).toHaveValue('/tmp/selected-program'));
   });
 
   it('renders headless rows and can create another inquiry', async () => {
@@ -74,7 +94,7 @@ describe('App', () => {
       program: { path: '/tmp/example' },
       rows: [{ id: 'row-1', title: 'Program inquiry', tiles: [{ id: 'tile-1', column: 0, target: { kind: 'file', filePath: 'main.go' }, overview: { kind: 'file', title: 'main.go', declarations: [{ symbolId: 'example::Run', kind: 'function', name: 'Run', line: 1, endLine: 3, exported: true }] }, text: { content: 'func Run() {\n\tRun()\n}', occurrences: [{ symbolId: 'example::Run', name: 'Run', startLine: 1, startColumn: 6, endLine: 1, endColumn: 9 }, { symbolId: 'example::Run', name: 'Run', startLine: 2, startColumn: 2, endLine: 2, endColumn: 5 }] }, panes: { overviewCollapsed: false, textCollapsed: false } }] }],
       active: { rowId: 'row-1', tileId: 'tile-1' },
-    })} />);
+    }, undefined, undefined, 'func Run() {\n\tRun()\n}')} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /function Run/ }));
 
@@ -135,13 +155,43 @@ describe('App', () => {
       program: { path: '/tmp/example' },
       rows: [{ id: 'row-1', title: 'Program inquiry', tiles: [{ id: 'tile-1', column: 0, target: { kind: 'program' }, overview: { kind: 'program', title: 'example', packages: [{ name: 'main', directory: '', fileCount: 1, files: [{ name: 'main.go', path: 'main.go', declarations: [{ kind: 'function', name: 'main', line: 1, endLine: 3, exported: false }] }] }] }, text: {}, panes: { overviewCollapsed: false, textCollapsed: false } }] }],
       active: { rowId: 'row-1', tileId: 'tile-1' },
-    }, undefined, (path) => { openedFile = path; })} />);
+    }, undefined, (path) => { openedFile = path; }, 'package main\n\nfunc main() {}\n')} />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Generate edits' }));
     expect(await screen.findAllByText('main.go')).not.toHaveLength(0);
     expect(screen.getByText('Structural edits (1)')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'function main' })).toBeInTheDocument();
-    await waitFor(() => expect(openedFile).toBe('main.go'));
+    expect(screen.getByRole('button', { name: 'Format' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open in new inquiry' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText('package main').length).toBeGreaterThan(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Open in new inquiry' }));
+    expect(await screen.findAllByText('main.go')).toHaveLength(2);
+    expect(screen.queryByText('Structural edits (1)')).not.toBeInTheDocument();
+    expect(openedFile).toBe('');
+  });
+
+  it('formats TSX with Prettier when the Format button is pressed', async () => {
+    render(<App providedEngine={fakeEngine({
+      revision: 1,
+      program: { path: '/tmp/example' },
+      rows: [{ id: 'row-1', title: 'Program inquiry', tiles: [{ id: 'tile-1', column: 0, target: { kind: 'file', packageName: 'main', filePath: 'App.tsx' }, overview: { kind: 'file', title: 'App.tsx' }, text: { language: 'tsx', content: "function App(){return <main><h1>Hello</h1></main>}" }, panes: { overviewCollapsed: false, textCollapsed: false } }] }],
+      active: { rowId: 'row-1', tileId: 'tile-1' },
+    })} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Format' }));
+    await waitFor(() => expect(document.querySelector('pre')?.textContent).toContain('function App() {'));
+    expect(document.querySelector('pre')?.textContent).toContain('  return (');
+  });
+
+  it('keeps readable blank lines between TSX statement sections', async () => {
+    render(<App providedEngine={fakeEngine({
+      revision: 1,
+      program: { path: '/tmp/example' },
+      rows: [{ id: 'row-1', title: 'Program inquiry', tiles: [{ id: 'tile-1', column: 0, target: { kind: 'file', packageName: 'main', filePath: 'server.ts' }, overview: { kind: 'file', title: 'server.ts' }, text: { language: 'typescript', content: "const app = express();\nconst port = 3000;\napp.listen(port, () => console.log('ready'));" }, panes: { overviewCollapsed: false, textCollapsed: false } }] }],
+      active: { rowId: 'row-1', tileId: 'tile-1' },
+    })} />);
+
+    await waitFor(() => expect(document.querySelector('pre')?.textContent).toContain('const port = 3000;\n\napp.listen'));
   });
 
   it('renders cousin branches beneath one shared ancestor', async () => {
@@ -189,6 +239,8 @@ describe('App', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Generate edits' }));
     expect((await screen.findAllByRole('button', { name: 'Apply full line' })).length).toBeGreaterThan(0);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Apply full line' }))[0]);
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Remove full line' }).length).toBeGreaterThan(0));
   });
 
   it('renders declaration inquiries with declaration-only source and edits', async () => {

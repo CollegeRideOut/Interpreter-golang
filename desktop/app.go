@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,7 +12,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
+	"github.com/creack/pty"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"interpreter/engine"
 	"interpreter/explorer"
 	headless "interpreter/workspace"
@@ -25,8 +29,13 @@ type App struct {
 	source           []byte
 	target           []byte
 	state            *engine.WorkingState
+	revisionMu       sync.Mutex
 	revisionRoot     string
 	comparisonStates map[string]*engine.WorkingState
+	terminalMu       sync.Mutex
+	terminal         *os.File
+	terminalCommand  *exec.Cmd
+	terminalDone     chan struct{}
 }
 
 type ProgramSnapshot struct {
@@ -79,6 +88,12 @@ type RevisionContext struct {
 	Branch        string           `json:"branch"`
 	CurrentCommit string           `json:"currentCommit"`
 	Options       []RevisionOption `json:"options"`
+}
+
+type ComparisonFile struct {
+	PackageDirectory string        `json:"packageDirectory"`
+	PackageName      string        `json:"packageName"`
+	File             explorer.File `json:"file"`
 }
 
 type EditSummary struct {
@@ -136,6 +151,8 @@ func (a *App) startup(ctx context.Context) {
 // OpenProgram opens the current working tree in read-only package exploration
 // mode. It does not require Git or create an edit session.
 func (a *App) OpenProgram(directory string) (ProgramSnapshot, error) {
+	a.revisionMu.Lock()
+	defer a.revisionMu.Unlock()
 	absolute, err := filepath.Abs(directory)
 	if err != nil {
 		return ProgramSnapshot{}, err
@@ -167,16 +184,152 @@ func (a *App) OpenProgram(directory string) (ProgramSnapshot, error) {
 	return ProgramSnapshot{Path: absolute, Exploration: true, Packages: packages, LocalImports: localImports}, nil
 }
 
+// ChooseDirectory opens the native directory picker and returns the selected
+// folder. An empty path means the picker was cancelled.
+func (a *App) ChooseDirectory() (string, error) {
+	if a.ctx == nil {
+		return "", fmt.Errorf("application is not ready")
+	}
+	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		DefaultDirectory: a.programPath,
+		Title:            "Choose a program folder",
+	})
+}
+
+// StartOpenCode starts the real OpenCode terminal in the selected repository.
+func (a *App) StartOpenCode(directory string) error {
+	if a.ctx == nil {
+		return fmt.Errorf("application is not ready")
+	}
+	absolute, err := filepath.Abs(directory)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(absolute)
+	if err != nil {
+		return fmt.Errorf("open folder: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("open folder: %s is not a directory", absolute)
+	}
+
+	a.terminalMu.Lock()
+	defer a.terminalMu.Unlock()
+	if a.terminal != nil {
+		return nil
+	}
+	command := exec.Command("opencode")
+	command.Dir = absolute
+	command.Env = append(os.Environ(), "TERM=xterm-256color", "COLORTERM=true")
+	terminal, err := pty.Start(command)
+	if err != nil {
+		return fmt.Errorf("start opencode: %w", err)
+	}
+	a.terminal = terminal
+	a.terminalCommand = command
+	a.terminalDone = make(chan struct{})
+	runtime.EventsEmit(a.ctx, "opencode:status", map[string]any{"running": true, "directory": absolute})
+
+	go a.readOpenCodeOutput(terminal)
+	go a.waitForOpenCode(command, terminal, a.terminalDone)
+	return nil
+}
+
+func (a *App) readOpenCodeOutput(terminal *os.File) {
+	buffer := make([]byte, 32*1024)
+	for {
+		count, err := terminal.Read(buffer)
+		if count > 0 && a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "opencode:output", string(buffer[:count]))
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+func (a *App) waitForOpenCode(command *exec.Cmd, terminal *os.File, done chan struct{}) {
+	err := command.Wait()
+	_ = terminal.Close()
+	a.terminalMu.Lock()
+	if a.terminal == terminal {
+		a.terminal = nil
+		a.terminalCommand = nil
+		a.terminalDone = nil
+	}
+	a.terminalMu.Unlock()
+	close(done)
+	if a.ctx != nil {
+		status := map[string]any{"running": false}
+		if err != nil {
+			status["error"] = err.Error()
+		}
+		runtime.EventsEmit(a.ctx, "opencode:status", status)
+	}
+}
+
+// WriteOpenCodeInput forwards keyboard input to the OpenCode PTY.
+func (a *App) WriteOpenCodeInput(input string) error {
+	a.terminalMu.Lock()
+	terminal := a.terminal
+	a.terminalMu.Unlock()
+	if terminal == nil {
+		return fmt.Errorf("opencode is not running")
+	}
+	_, err := terminal.Write([]byte(input))
+	return err
+}
+
+// ResizeOpenCode updates the PTY dimensions used by the OpenCode TUI.
+func (a *App) ResizeOpenCode(columns, rows uint16) error {
+	a.terminalMu.Lock()
+	terminal := a.terminal
+	a.terminalMu.Unlock()
+	if terminal == nil {
+		return fmt.Errorf("opencode is not running")
+	}
+	return pty.Setsize(terminal, &pty.Winsize{Cols: columns, Rows: rows})
+}
+
+// StopOpenCode stops the embedded OpenCode process.
+func (a *App) StopOpenCode() error {
+	a.terminalMu.Lock()
+	command := a.terminalCommand
+	done := a.terminalDone
+	a.terminalMu.Unlock()
+	if command == nil || command.Process == nil {
+		return nil
+	}
+	killErr := command.Process.Kill()
+	if done != nil {
+		<-done
+	}
+	if killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
+		return killErr
+	}
+	return nil
+}
+
 // SelectRevision reloads the explorer from the working tree or an immutable
 // Git snapshot. It never checks out or changes the user's repository.
 func (a *App) SelectRevision(directory, revision string) (headless.State, error) {
+	a.revisionMu.Lock()
+	defer a.revisionMu.Unlock()
 	absolute, err := filepath.Abs(directory)
 	if err != nil {
 		return headless.State{}, err
 	}
-	a.clearRevisionRoot()
+	previousRoot := a.revisionRoot
 	if revision == "working-tree" || revision == "" {
-		return a.headlessWorkspace().OpenProgram(absolute)
+		state, openErr := a.headlessWorkspace().OpenProgram(absolute)
+		if openErr != nil {
+			return headless.State{}, openErr
+		}
+		a.revisionRoot = ""
+		if previousRoot != "" {
+			_ = os.RemoveAll(previousRoot)
+		}
+		return state, nil
 	}
 	root, err := os.MkdirTemp("", "contuts-revision-")
 	if err != nil {
@@ -186,13 +339,21 @@ func (a *App) SelectRevision(directory, revision string) (headless.State, error)
 		os.RemoveAll(root)
 		return headless.State{}, err
 	}
-	a.revisionRoot = root
 	a.programPath = absolute
 	a.source = nil
 	a.target = nil
 	a.state = nil
 	a.comparisonStates = make(map[string]*engine.WorkingState)
-	return a.headlessWorkspace().OpenProgramAt(absolute, root)
+	state, err := a.headlessWorkspace().OpenProgramAt(absolute, root)
+	if err != nil {
+		os.RemoveAll(root)
+		return headless.State{}, err
+	}
+	a.revisionRoot = root
+	if previousRoot != "" && previousRoot != root {
+		_ = os.RemoveAll(previousRoot)
+	}
+	return state, nil
 }
 
 // GetFileEdits returns structural edits needed to transform currentRevision
@@ -224,6 +385,61 @@ func (a *App) GetFileEditState(directory, currentRevision, compareRevision, pack
 	return summarizeComparisonState(state), nil
 }
 
+// GetComparisonFiles returns the union of supported files present in either
+// revision. A file may exist only in one revision and still needs comparison.
+func (a *App) GetComparisonFiles(directory, currentRevision, compareRevision string) ([]ComparisonFile, error) {
+	absolute, err := filepath.Abs(directory)
+	if err != nil {
+		return nil, err
+	}
+	files := make(map[string]ComparisonFile)
+	roots := make([]string, 0, 2)
+	cleanup := make([]string, 0, 2)
+	for _, revision := range []string{currentRevision, compareRevision} {
+		root := absolute
+		if revision != "working-tree" && revision != "" {
+			root, err = os.MkdirTemp("", "contuts-comparison-")
+			if err != nil {
+				return nil, err
+			}
+			cleanup = append(cleanup, root)
+			if err := materializeGitRevision(absolute, revision, root); err != nil {
+				return nil, err
+			}
+		}
+		roots = append(roots, root)
+	}
+	for _, root := range roots {
+		packages, discoverErr := explorer.DiscoverPackages(root)
+		if discoverErr != nil {
+			for _, path := range cleanup {
+				_ = os.RemoveAll(path)
+			}
+			return nil, discoverErr
+		}
+		collectComparisonFiles(packages, files)
+	}
+	for _, path := range cleanup {
+		_ = os.RemoveAll(path)
+	}
+	result := make([]ComparisonFile, 0, len(files))
+	for _, file := range files {
+		result = append(result, file)
+	}
+	sort.Slice(result, func(left, right int) bool { return result[left].File.Path < result[right].File.Path })
+	return result, nil
+}
+
+func collectComparisonFiles(packages []explorer.Package, files map[string]ComparisonFile) {
+	for _, pkg := range packages {
+		for _, file := range pkg.Files {
+			key := strings.Join([]string{pkg.Directory, pkg.Name, file.Path}, "\x00")
+			files[key] = ComparisonFile{PackageDirectory: pkg.Directory, PackageName: pkg.Name, File: file}
+		}
+		collectComparisonFiles(pkg.Children, files)
+	}
+}
+
 func comparisonKey(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string) string {
 	return strings.Join([]string{directory, currentRevision, compareRevision, packageDirectory, packageName, filePath}, "\x00")
 }
@@ -232,6 +448,8 @@ func languageForFile(filePath string) string {
 	switch strings.ToLower(filepath.Ext(filePath)) {
 	case ".ts":
 		return "typescript"
+	case ".tsx":
+		return "tsx"
 	case ".html", ".htm":
 		return "html"
 	}
@@ -246,20 +464,40 @@ func (a *App) comparisonState(directory, currentRevision, compareRevision, packa
 	if state := a.comparisonStates[key]; state != nil {
 		return state, nil
 	}
-	current, err := revisionFileBytes(directory, currentRevision, filePath)
+	language := languageForFile(filePath)
+	current, currentExists, err := revisionFileBytesOptional(directory, currentRevision, filePath)
 	if err != nil {
 		return nil, err
 	}
-	compare, err := revisionFileBytes(directory, compareRevision, filePath)
+	compare, compareExists, err := revisionFileBytesOptional(directory, compareRevision, filePath)
 	if err != nil {
 		return nil, err
 	}
-	state, err := engine.NewWorkingStateFromLanguage(languageForFile(filePath), current, compare)
+	if (!currentExists || !compareExists) && language == "go" {
+		return nil, fmt.Errorf("cannot compare missing Go file %s", filePath)
+	}
+	state, err := engine.NewWorkingStateFromLanguage(language, current, compare)
 	if err != nil {
 		return nil, fmt.Errorf("compare %s: %w", filePath, err)
 	}
 	a.comparisonStates[key] = state
 	return state, nil
+}
+
+func revisionFileBytesOptional(directory, revision, filePath string) ([]byte, bool, error) {
+	if revision == "working-tree" || revision == "" {
+		contents, err := os.ReadFile(filepath.Join(directory, filepath.FromSlash(filePath)))
+		if os.IsNotExist(err) {
+			return []byte{}, false, nil
+		}
+		return contents, err == nil, err
+	}
+	exists := exec.Command("git", "-C", directory, "cat-file", "-e", revision+":"+filePath).Run() == nil
+	if !exists {
+		return []byte{}, false, nil
+	}
+	contents, err := exec.Command("git", "-C", directory, "show", revision+":"+filePath).Output()
+	return contents, err == nil, err
 }
 
 func summarizeComparisonState(state *engine.WorkingState) FileEditState {
@@ -314,7 +552,10 @@ func (a *App) ApplyFileEditSubtree(directory, currentRevision, compareRevision, 
 	if err != nil {
 		return FileEditState{}, err
 	}
-	if err := state.ApplyProjectedSubtree(index, engine.ApplyOptions{Reconcile: true}, liftOptions(defaultHiddenKinds())); err != nil {
+	// Full-line actions apply the selected AST subtree without implicitly
+	// reconciling every target descendant. Descendants stay independently
+	// removable when the parent is rebuilt.
+	if err := state.ApplyProjectedSubtree(index, engine.ApplyOptions{Reconcile: false}, liftOptions(defaultHiddenKinds())); err != nil {
 		return FileEditState{}, err
 	}
 	return summarizeComparisonState(state), nil
@@ -428,9 +669,10 @@ func (a *App) GetRevisionContext(directory string) (RevisionContext, error) {
 	if err != nil {
 		branch = "HEAD"
 	}
-	commit, err := gitOutput(absolute, "rev-parse", "HEAD")
-	if err != nil {
-		return RevisionContext{}, fmt.Errorf("read current Git commit: %w", err)
+	commit, commitErr := gitOutput(absolute, "rev-parse", "HEAD")
+	if commitErr != nil {
+		// An initialized repository may not have its first commit yet.
+		commit = ""
 	}
 	branchRows, err := gitOutput(absolute, "for-each-ref", "--format=%(refname:short)\t%(objectname)\t%(committerdate:iso8601)\t%(subject)", "refs/heads", "refs/remotes")
 	if err != nil {
@@ -493,6 +735,31 @@ func (a *App) GetCurrentState() (headless.State, error) {
 // StartInquiry adds a new independent inquiry row at the bottom.
 func (a *App) StartInquiry(title string) (headless.State, error) {
 	return a.headlessWorkspace().StartInquiry(title)
+}
+
+// OpenComparisonFile starts a new inquiry for a file that may only exist in
+// one side of the selected revision comparison. The compare-to revision is
+// the active workspace snapshot, so the opened file shows the version being edited.
+func (a *App) OpenComparisonFile(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string) (headless.State, error) {
+	absolute, err := filepath.Abs(directory)
+	if err != nil {
+		return headless.State{}, err
+	}
+	files, err := a.GetComparisonFiles(directory, currentRevision, compareRevision)
+	if err != nil {
+		return headless.State{}, err
+	}
+	for _, comparisonFile := range files {
+		if comparisonFile.PackageDirectory != packageDirectory || comparisonFile.PackageName != packageName || comparisonFile.File.Path != filePath {
+			continue
+		}
+		source, _, err := revisionFileBytesOptional(absolute, compareRevision, filePath)
+		if err != nil {
+			return headless.State{}, err
+		}
+		return a.headlessWorkspace().OpenComparisonFile(filePath, packageDirectory, packageName, comparisonFile.File, string(source))
+	}
+	return headless.State{}, fmt.Errorf("comparison file %s was not found", filePath)
 }
 
 // OpenInquiryPackage appends a package tile to an inquiry row.
@@ -1015,7 +1282,7 @@ func (a *App) beforeClose(ctx context.Context) (prevent bool) {
 
 // shutdown is called at application termination
 func (a *App) shutdown(ctx context.Context) {
-	// Perform your teardown here
+	_ = a.StopOpenCode()
 }
 
 // Greet returns a greeting for the given name

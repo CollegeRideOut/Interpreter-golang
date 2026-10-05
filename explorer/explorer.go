@@ -1,6 +1,7 @@
 package explorer
 
 import (
+	"encoding/json"
 	"fmt"
 	goAst "go/ast"
 	"go/format"
@@ -9,19 +10,21 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 )
 
-// Package describes one Go package found in a working tree. It intentionally
-// stops at package level; files and declarations are future explorer views.
+// Package describes one source package or project found in a working tree.
 type Package struct {
-	Name         string   `json:"name"`
-	Directory    string   `json:"directory"`
-	FileCount    int      `json:"fileCount"`
-	Files        []File   `json:"files,omitempty"`
-	LocalImports []string `json:"localImports,omitempty"`
+	Kind         string    `json:"kind,omitempty"`
+	Name         string    `json:"name"`
+	Directory    string    `json:"directory"`
+	FileCount    int       `json:"fileCount"`
+	Files        []File    `json:"files,omitempty"`
+	Children     []Package `json:"children,omitempty"`
+	LocalImports []string  `json:"localImports,omitempty"`
 }
 
 type File struct {
@@ -83,7 +86,7 @@ type Parameter struct {
 	Type string `json:"type"`
 }
 
-// DiscoverPackages reads Go source files without compiling or type checking.
+// DiscoverPackages reads supported source files without compiling or type checking.
 func DiscoverPackages(root string) ([]Package, error) {
 	type packageFiles struct {
 		name    string
@@ -145,6 +148,9 @@ func DiscoverPackages(root string) ([]Package, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(found) == 0 {
+		return discoverNonGoProject(root)
+	}
 	packages := make([]Package, 0, len(found))
 	for key, item := range found {
 		directory := strings.SplitN(key, "\x00", 2)[0]
@@ -174,6 +180,175 @@ func DiscoverPackages(root string) ([]Package, error) {
 		annotateOccurrences(root, module, packages, &packages[index])
 	}
 	return packages, nil
+}
+
+// discoverNonGoProject provides a lightweight project view for supported
+// source trees that do not contain Go packages. Language-specific parsing and
+// structural editing still happen later in the engine adapter.
+func discoverNonGoProject(root string) ([]Package, error) {
+	files := make([]File, 0)
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if path != root && (entry.Name() == "node_modules" || entry.Name() == "dist" || entry.Name() == "build" || entry.Name() == ".git" || strings.HasPrefix(entry.Name(), ".")) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !supportedNonGoFile(path) {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files = append(files, File{Name: filepath.Base(path), Path: filepath.ToSlash(relative), Declarations: typescriptDeclarations(contents)})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	name := filepath.Base(root)
+	if packageFile, err := os.ReadFile(filepath.Join(root, "package.json")); err == nil {
+		var metadata struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(packageFile, &metadata) == nil && metadata.Name != "" {
+			name = metadata.Name
+		}
+	}
+	return nonGoProjectTree(root, name, files), nil
+}
+
+func nonGoProjectTree(root, name string, files []File) []Package {
+	byDirectory := make(map[string]*Package)
+	byDirectory[""] = &Package{Kind: "project", Name: name, Directory: ""}
+	for _, file := range files {
+		directory := filepath.ToSlash(filepath.Dir(file.Path))
+		if directory == "." {
+			directory = ""
+		}
+		for current := directory; ; {
+			if _, exists := byDirectory[current]; !exists {
+				byDirectory[current] = &Package{Kind: "folder", Name: filepath.Base(current), Directory: current}
+			}
+			if current == "" {
+				break
+			}
+			parent := filepath.ToSlash(filepath.Dir(current))
+			if parent == "." {
+				parent = ""
+			}
+			current = parent
+		}
+		byDirectory[directory].Files = append(byDirectory[directory].Files, file)
+	}
+	for _, packageNode := range byDirectory {
+		packageNode.FileCount = len(packageNode.Files)
+		sort.Slice(packageNode.Files, func(i, j int) bool { return packageNode.Files[i].Path < packageNode.Files[j].Path })
+	}
+	var materialize func(string) Package
+	materialize = func(directory string) Package {
+		packageNode := *byDirectory[directory]
+		packageNode.Children = nil
+		childDirectories := make([]string, 0)
+		for candidate := range byDirectory {
+			if candidate == "" || candidate == directory {
+				continue
+			}
+			parent := filepath.ToSlash(filepath.Dir(candidate))
+			if parent == "." {
+				parent = ""
+			}
+			if parent == directory {
+				childDirectories = append(childDirectories, candidate)
+			}
+		}
+		sort.Strings(childDirectories)
+		for _, childDirectory := range childDirectories {
+			packageNode.Children = append(packageNode.Children, materialize(childDirectory))
+		}
+		return packageNode
+	}
+	rootPackage := materialize("")
+	rootPackage.FileCount = len(files)
+	return []Package{rootPackage}
+}
+
+var typescriptDeclarationPattern = regexp.MustCompile(`^\s*(export\s+(?:default\s+)?)?(?:declare\s+)?(?:abstract\s+)?(class|interface|type|enum|function|const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)`)
+var typescriptExportListPattern = regexp.MustCompile(`^\s*export\s*\{([^}]*)\}`)
+
+func typescriptDeclarations(source []byte) []Declaration {
+	lines := strings.Split(string(source), "\n")
+	declarations := make([]Declaration, 0)
+	for index, line := range lines {
+		match := typescriptDeclarationPattern.FindStringSubmatch(line)
+		if len(match) != 4 {
+			continue
+		}
+		kind, name := match[2], match[3]
+		declarations = append(declarations, Declaration{
+			Kind:     kind,
+			Name:     name,
+			Line:     index + 1,
+			EndLine:  typescriptDeclarationEnd(lines, index),
+			Exported: strings.TrimSpace(match[1]) != "",
+		})
+	}
+	for _, line := range lines {
+		match := typescriptExportListPattern.FindStringSubmatch(line)
+		if len(match) != 2 {
+			continue
+		}
+		for _, item := range strings.Split(match[1], ",") {
+			name := strings.TrimSpace(strings.SplitN(strings.TrimSpace(item), " as ", 2)[0])
+			for index := range declarations {
+				if declarations[index].Name == name {
+					declarations[index].Exported = true
+				}
+			}
+		}
+	}
+	return declarations
+}
+
+func typescriptDeclarationEnd(lines []string, start int) int {
+	depth := 0
+	opened := false
+	for index := start; index < len(lines); index++ {
+		for _, character := range lines[index] {
+			switch character {
+			case '{':
+				depth++
+				opened = true
+			case '}':
+				depth--
+			}
+		}
+		if opened && depth <= 0 {
+			return index + 1
+		}
+		if !opened && strings.Contains(lines[index], ";") {
+			return index + 1
+		}
+	}
+	return start + 1
+}
+
+func supportedNonGoFile(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".ts", ".tsx", ".html", ".htm":
+		return true
+	default:
+		return false
+	}
 }
 
 func packagePath(module string, pkg Package) string {

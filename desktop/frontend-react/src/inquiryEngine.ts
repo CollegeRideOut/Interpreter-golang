@@ -1,8 +1,10 @@
 export type Package = {
+  kind?: 'project' | 'folder' | 'package';
   name: string;
   directory: string;
   fileCount: number;
   files?: File[];
+  children?: Package[];
 };
 
 export type File = {
@@ -177,18 +179,31 @@ export type FileEditState = {
   valid: boolean;
 };
 
+export type ComparisonFile = {
+  packageDirectory: string;
+  packageName: string;
+  file: File;
+};
+
 export interface InquiryEngine {
   getCurrentState(): Promise<HeadlessState>;
   getRevisionContext(directory: string): Promise<RevisionContext>;
   openProgram(directory: string): Promise<HeadlessState>;
+  chooseDirectory(): Promise<string>;
+  startOpenCode(directory: string): Promise<void>;
+  writeOpenCodeInput(input: string): Promise<void>;
+  resizeOpenCode(columns: number, rows: number): Promise<void>;
+  stopOpenCode(): Promise<void>;
   selectRevision(directory: string, revision: string): Promise<HeadlessState>;
   getFileEdits(directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string): Promise<EditSummary[]>;
   getFileEditState(directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string): Promise<FileEditState>;
+  getComparisonFiles(directory: string, currentRevision: string, compareRevision: string): Promise<ComparisonFile[]>;
   applyFileEdit(directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string, index: number): Promise<FileEditState>;
   applyFileEditSubtree(directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string, index: number): Promise<FileEditState>;
   removeFileEdit(directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string, index: number): Promise<FileEditState>;
   removeFileEditSubtree(directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string, index: number): Promise<FileEditState>;
   startInquiry(title: string): Promise<HeadlessState>;
+  openComparisonFile(directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string): Promise<HeadlessState>;
   openPackage(rowID: string, tileID: string, packageDirectory: string, packageName: string): Promise<HeadlessState>;
   navigatePackage(rowID: string, tileID: string, packageDirectory: string, packageName: string): Promise<HeadlessState>;
   back(rowID: string, tileID: string): Promise<HeadlessState>;
@@ -207,9 +222,15 @@ export interface InquiryEngine {
 
 type WailsEngine = {
   OpenProgram: (directory: string) => Promise<unknown>;
+  ChooseDirectory: () => Promise<string>;
+  StartOpenCode: (directory: string) => Promise<void>;
+  WriteOpenCodeInput: (input: string) => Promise<void>;
+  ResizeOpenCode: (columns: number, rows: number) => Promise<void>;
+  StopOpenCode: () => Promise<void>;
   SelectRevision: (directory: string, revision: string) => Promise<HeadlessState>;
   GetFileEdits: (directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string) => Promise<EditSummary[]>;
   GetFileEditState: (directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string) => Promise<FileEditState>;
+  GetComparisonFiles: (directory: string, currentRevision: string, compareRevision: string) => Promise<ComparisonFile[]>;
   ApplyFileEdit: (directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string, index: number) => Promise<FileEditState>;
   ApplyFileEditSubtree: (directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string, index: number) => Promise<FileEditState>;
   RemoveFileEdit: (directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string, index: number) => Promise<FileEditState>;
@@ -217,6 +238,7 @@ type WailsEngine = {
   GetCurrentState: () => Promise<HeadlessState>;
   GetRevisionContext: (directory: string) => Promise<RevisionContext>;
   StartInquiry: (title: string) => Promise<HeadlessState>;
+  OpenComparisonFile: (directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string) => Promise<HeadlessState>;
   OpenInquiryPackage: (rowID: string, tileID: string, packageDirectory: string, packageName: string) => Promise<HeadlessState>;
   NavigateInquiryPackage: (rowID: string, tileID: string, packageDirectory: string, packageName: string) => Promise<HeadlessState>;
   BackInquiry: (rowID: string, tileID: string) => Promise<HeadlessState>;
@@ -258,14 +280,21 @@ export function createWailsEngine(): InquiryEngine {
       await app().OpenProgram(directory);
       return app().GetCurrentState();
     },
+    chooseDirectory: () => app().ChooseDirectory(),
+    startOpenCode: (directory) => app().StartOpenCode(directory),
+    writeOpenCodeInput: (input) => app().WriteOpenCodeInput(input),
+    resizeOpenCode: (columns, rows) => app().ResizeOpenCode(columns, rows),
+    stopOpenCode: () => app().StopOpenCode(),
     selectRevision: (directory, revision) => app().SelectRevision(directory, revision),
     getFileEdits: (directory, currentRevision, compareRevision, packageDirectory, packageName, filePath) => app().GetFileEdits(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath),
     getFileEditState: (directory, currentRevision, compareRevision, packageDirectory, packageName, filePath) => app().GetFileEditState(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath),
+    getComparisonFiles: (directory, currentRevision, compareRevision) => app().GetComparisonFiles(directory, currentRevision, compareRevision),
     applyFileEdit: (directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, index) => app().ApplyFileEdit(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, index),
     applyFileEditSubtree: (directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, index) => app().ApplyFileEditSubtree(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, index),
     removeFileEdit: (directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, index) => app().RemoveFileEdit(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, index),
     removeFileEditSubtree: (directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, index) => app().RemoveFileEditSubtree(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, index),
     startInquiry: (title) => app().StartInquiry(title),
+    openComparisonFile: (directory, currentRevision, compareRevision, packageDirectory, packageName, filePath) => app().OpenComparisonFile(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath),
     openPackage: (rowID, tileID, packageDirectory, packageName) => app().OpenInquiryPackage(rowID, tileID, packageDirectory, packageName),
     navigatePackage: (rowID, tileID, packageDirectory, packageName) => app().NavigateInquiryPackage(rowID, tileID, packageDirectory, packageName),
     back: (rowID, tileID) => app().BackInquiry(rowID, tileID),

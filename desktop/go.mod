@@ -4,7 +4,10 @@ go 1.26.2
 
 require github.com/wailsapp/wails/v2 v2.15.0
 
-require interpreter v0.0.0
+require (
+	github.com/creack/pty v1.1.18
+	interpreter v0.0.0
+)
 
 require (
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect

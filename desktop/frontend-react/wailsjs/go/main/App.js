@@ -34,6 +34,10 @@ export function BackInquiry(arg1, arg2) {
   return window['go']['main']['App']['BackInquiry'](arg1, arg2);
 }
 
+export function ChooseDirectory() {
+  return window['go']['main']['App']['ChooseDirectory']();
+}
+
 export function CloseInquiryColumn(arg1, arg2) {
   return window['go']['main']['App']['CloseInquiryColumn'](arg1, arg2);
 }
@@ -44,6 +48,10 @@ export function CloseInquiryTile(arg1, arg2) {
 
 export function ExplorePreviousCommitEdits(arg1) {
   return window['go']['main']['App']['ExplorePreviousCommitEdits'](arg1);
+}
+
+export function GetComparisonFiles(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetComparisonFiles'](arg1, arg2, arg3);
 }
 
 export function GetCurrentState() {
@@ -88,6 +96,10 @@ export function NavigateInquiryFile(arg1, arg2, arg3, arg4, arg5) {
 
 export function NavigateInquiryPackage(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['NavigateInquiryPackage'](arg1, arg2, arg3, arg4);
+}
+
+export function OpenComparisonFile(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['OpenComparisonFile'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function OpenDeclaration(arg1, arg2, arg3, arg4, arg5, arg6) {
@@ -170,6 +182,10 @@ export function RemoveFileEditSubtree(arg1, arg2, arg3, arg4, arg5, arg6, arg7) 
   return window['go']['main']['App']['RemoveFileEditSubtree'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }
 
+export function ResizeOpenCode(arg1, arg2) {
+  return window['go']['main']['App']['ResizeOpenCode'](arg1, arg2);
+}
+
 export function SelectRevision(arg1, arg2) {
   return window['go']['main']['App']['SelectRevision'](arg1, arg2);
 }
@@ -184,4 +200,16 @@ export function SetInquiryTileCollapsed(arg1, arg2, arg3) {
 
 export function StartInquiry(arg1) {
   return window['go']['main']['App']['StartInquiry'](arg1);
+}
+
+export function StartOpenCode(arg1) {
+  return window['go']['main']['App']['StartOpenCode'](arg1);
+}
+
+export function StopOpenCode() {
+  return window['go']['main']['App']['StopOpenCode']();
+}
+
+export function WriteOpenCodeInput(arg1) {
+  return window['go']['main']['App']['WriteOpenCodeInput'](arg1);
 }

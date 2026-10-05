@@ -17,7 +17,11 @@ func RenderBestEffort(root *Node) RenderResult {
 		result.Diagnostics = []string{"working tree is empty"}
 		return result
 	}
-	if root.Language == "typescript" || root.Language == "html" {
+	if root.Language == "html" {
+		result.Code = strings.TrimSpace(renderHTMLNode(root)) + "\n"
+		return result
+	}
+	if root.Language == "typescript" || root.Language == "tsx" {
 		result.Code = strings.TrimSpace(renderTypeScriptNode(root)) + "\n"
 		return result
 	}
@@ -25,40 +29,110 @@ func RenderBestEffort(root *Node) RenderResult {
 	return result
 }
 
-func renderTypeScriptNode(node *structuralASTNode) string {
+func renderHTMLNode(node *structuralASTNode) string {
 	if node == nil {
 		return ""
 	}
 	if len(node.Children) == 0 {
 		return node.Value
 	}
-	if node.StartByte > node.EndByte || node.EndByte > uint(len(node.source)) {
+	if node.Kind == "html:document" {
 		parts := make([]string, 0, len(node.Children))
 		for _, child := range node.Children {
-			parts = append(parts, renderTypeScriptNode(child))
+			if value := renderHTMLNodeIndented(child, 0); value != "" {
+				parts = append(parts, value)
+			}
+		}
+		return strings.Join(parts, "\n")
+	}
+	return renderHTMLNodeIndented(node, 0)
+}
+
+func renderHTMLNodeIndented(node *structuralASTNode, indent int) string {
+	if node == nil {
+		return ""
+	}
+	if len(node.Children) == 0 {
+		return node.Value
+	}
+	switch node.Kind {
+	case "html:element":
+		return renderHTMLElement(node, indent)
+	case "html:start_tag", "html:end_tag", "html:self_closing_tag":
+		return renderHTMLInline(node)
+	default:
+		parts := make([]string, 0, len(node.Children))
+		for _, child := range node.Children {
+			parts = append(parts, renderHTMLNodeIndented(child, indent))
 		}
 		return strings.Join(parts, "")
 	}
-	base := node.source[node.StartByte:node.EndByte]
-	var builder strings.Builder
-	cursor := uint(0)
-	for _, child := range node.Children {
-		if child.StartByte < node.StartByte || child.StartByte > node.EndByte || child.EndByte < child.StartByte {
-			builder.WriteString(renderTypeScriptNode(child))
-			continue
-		}
-		start := child.StartByte - node.StartByte
-		end := child.EndByte - node.StartByte
-		if start < cursor || end > uint(len(base)) {
-			builder.WriteString(renderTypeScriptNode(child))
-			continue
-		}
-		builder.Write(base[cursor:start])
-		builder.WriteString(renderTypeScriptNode(child))
-		cursor = end
+}
+
+func renderHTMLInline(node *structuralASTNode) string {
+	if node == nil {
+		return ""
 	}
-	builder.Write(base[cursor:])
+	if len(node.Children) == 0 {
+		return node.Value
+	}
+	var builder strings.Builder
+	for _, child := range node.Children {
+		if (node.Kind == "html:start_tag" || node.Kind == "html:self_closing_tag") && child.Kind == "html:attribute" {
+			builder.WriteByte(' ')
+		}
+		builder.WriteString(renderHTMLInline(child))
+	}
 	return builder.String()
+}
+
+func renderHTMLElement(node *structuralASTNode, indent int) string {
+	parts := make([]*structuralASTNode, 0, len(node.Children))
+	for _, child := range node.Children {
+		parts = append(parts, child)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	start := renderHTMLInline(parts[0])
+	if len(parts) == 1 {
+		return strings.Repeat("  ", indent) + start
+	}
+	end := renderHTMLInline(parts[len(parts)-1])
+	content := parts[1 : len(parts)-1]
+	if len(content) == 0 {
+		return strings.Repeat("  ", indent) + start + end
+	}
+	contentValues := make([]string, 0, len(content))
+	blockContent := false
+	for _, child := range content {
+		value := renderHTMLNodeIndented(child, indent+1)
+		if value != "" {
+			contentValues = append(contentValues, value)
+		}
+		if child.Kind == "html:element" || child.Kind == "html:script_element" || child.Kind == "html:style_element" {
+			blockContent = true
+		}
+	}
+	if !blockContent {
+		return strings.Repeat("  ", indent) + start + strings.Join(contentValues, "") + end
+	}
+	for index, value := range contentValues {
+		child := content[index]
+		if child.Kind != "html:element" && child.Kind != "html:script_element" && child.Kind != "html:style_element" {
+			contentValues[index] = strings.Repeat("  ", indent+1) + value
+		}
+	}
+	return strings.Repeat("  ", indent) + start + "\n" + strings.Join(contentValues, "\n") + "\n" + strings.Repeat("  ", indent) + end
+}
+
+func renderTypeScriptNode(node *structuralASTNode) string {
+	if node == nil {
+		return ""
+	}
+	tokens := make([]string, 0)
+	collectTypeScriptTokens(node, &tokens)
+	return formatTypeScriptTokens(tokens)
 }
 
 func renderNode(node *structuralASTNode, indent int, diagnostics *[]string) string {

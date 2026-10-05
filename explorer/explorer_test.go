@@ -3,6 +3,7 @@ package explorer
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 )
 
@@ -93,5 +94,58 @@ func TestOccurrencesUseImportedPackageAndExactIdentifierIdentity(t *testing.T) {
 	}
 	if !foundDeclaration {
 		t.Fatalf("server occurrences = %+v", serverFile.Occurrences)
+	}
+}
+
+func TestDiscoverPackagesIndexesSupportedNonGoProject(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"name":"ticket-system-api"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src", "modules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"src/main.ts":                      "export function main() {}\n",
+		"src/modules/ticket.service.ts":    "export class TicketService {}\n",
+		"src/modules/ticket.template.html": "<main></main>\n",
+		"src/modules/ignored.js":           "module.exports = {};\n",
+		"node_modules/ignored.ts":          "export const ignored = true;\n",
+		"dist/ignored.ts":                  "export const ignored = true;\n",
+	}
+	for path, content := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, path)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, path), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	packages, err := DiscoverPackages(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packages) != 1 || packages[0].Name != "ticket-system-api" || packages[0].FileCount != 3 {
+		t.Fatalf("packages = %+v", packages)
+	}
+	var discovered []string
+	var collect func(Package)
+	collect = func(packageNode Package) {
+		for _, file := range packageNode.Files {
+			discovered = append(discovered, file.Path)
+		}
+		for _, child := range packageNode.Children {
+			collect(child)
+		}
+	}
+	collect(packages[0])
+	sort.Strings(discovered)
+	if len(discovered) != 3 || discovered[0] != "src/main.ts" || discovered[1] != "src/modules/ticket.service.ts" || discovered[2] != "src/modules/ticket.template.html" {
+		t.Fatalf("files = %+v", discovered)
+	}
+	declarations := packages[0].Children[0].Files[0].Declarations
+	if len(declarations) != 1 || declarations[0].Name != "main" || !declarations[0].Exported {
+		t.Fatalf("TypeScript declarations = %+v", declarations)
 	}
 }

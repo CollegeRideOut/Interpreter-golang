@@ -16,6 +16,11 @@ func ParseTypeScript(source []byte) (*Node, error) {
 	return parseTreeSitter(source, "typescript", typescript.LanguageTypescript())
 }
 
+// ParseTSX converts TypeScript JSX source into the editable structural tree.
+func ParseTSX(source []byte) (*Node, error) {
+	return parseTreeSitter(source, "tsx", typescript.LanguageTSX())
+}
+
 func parseTreeSitter(source []byte, language string, languagePointer unsafe.Pointer) (*Node, error) {
 	parser := tree_sitter.NewParser()
 	defer parser.Close()
@@ -40,6 +45,21 @@ func DiffTypeScript(source, target []byte) (sourceTree, targetTree *Node, edits 
 		return nil, nil, nil, err
 	}
 	targetTree, err = ParseTypeScript(target)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	edits = simpleStructuralEditScripts(sourceTree, targetTree)
+	bindStructuralEditIdentities(sourceTree, targetTree, edits)
+	return sourceTree, targetTree, edits, nil
+}
+
+// DiffTSX returns TSX trees and their structural edit script.
+func DiffTSX(source, target []byte) (sourceTree, targetTree *Node, edits []Edit, err error) {
+	sourceTree, err = ParseTSX(source)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	targetTree, err = ParseTSX(target)
 	if err != nil {
 		return nil, nil, nil, err
 	}

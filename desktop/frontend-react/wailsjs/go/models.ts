@@ -143,6 +143,7 @@ export namespace engine {
 	export class structuralEdit {
 	    index: number;
 	    kind: string;
+	    hidden?: boolean;
 	    nodeId: string;
 	    nodeGlobalId?: string;
 	    sourceGlobalId?: string;
@@ -165,6 +166,7 @@ export namespace engine {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.index = source["index"];
 	        this.kind = source["kind"];
+	        this.hidden = source["hidden"];
 	        this.nodeId = source["nodeId"];
 	        this.nodeGlobalId = source["nodeGlobalId"];
 	        this.sourceGlobalId = source["sourceGlobalId"];
@@ -553,6 +555,8 @@ export namespace main {
 	    renderDiagnostics?: string[];
 	    diagnostics?: string[];
 	    valid: boolean;
+	    branchId?: string;
+	    workingAuthoritative?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new FileEditState(source);
@@ -568,6 +572,8 @@ export namespace main {
 	        this.renderDiagnostics = source["renderDiagnostics"];
 	        this.diagnostics = source["diagnostics"];
 	        this.valid = source["valid"];
+	        this.branchId = source["branchId"];
+	        this.workingAuthoritative = source["workingAuthoritative"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -684,6 +690,64 @@ export namespace main {
 	        this.importedSource = source["importedSource"];
 	        this.importedName = source["importedName"];
 	        this.files = this.convertValues(source["files"], explorer.File);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ProposalBranchSummary {
+	    id: string;
+	    name: string;
+	    kind: string;
+	    parentId?: string;
+	    baseRevision: string;
+	    sourceRevision?: string;
+	    active: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProposalBranchSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.kind = source["kind"];
+	        this.parentId = source["parentId"];
+	        this.baseRevision = source["baseRevision"];
+	        this.sourceRevision = source["sourceRevision"];
+	        this.active = source["active"];
+	    }
+	}
+	export class ProposalWorkspace {
+	    activeBranchId: string;
+	    selectedProposalIds?: string[];
+	    branches: ProposalBranchSummary[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ProposalWorkspace(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.activeBranchId = source["activeBranchId"];
+	        this.selectedProposalIds = source["selectedProposalIds"];
+	        this.branches = this.convertValues(source["branches"], ProposalBranchSummary);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

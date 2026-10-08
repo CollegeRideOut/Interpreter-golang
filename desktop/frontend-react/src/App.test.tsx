@@ -10,11 +10,13 @@ function fakeEngine(initialState?: HeadlessState, fileEdits: EditSummary[] = [{ 
     rows: [{ id: 'row-1', title: 'Program inquiry', tiles: [{ id: 'tile-1', column: 0, target: { kind: 'program' }, overview: { kind: 'program', title: 'example', packages: [{ name: 'main', directory: '', fileCount: 1, files: [] }] }, text: {}, panes: { overviewCollapsed: false, textCollapsed: false } }] }],
     active: { rowId: 'row-1', tileId: 'tile-1' },
   };
+  let proposalWorkspace = { activeBranchId: 'base', selectedProposalIds: [] as string[], branches: [{ id: 'base', name: 'Base', kind: 'base', baseRevision: 'working-tree', active: true }, { id: 'human', name: 'Human build', kind: 'human', parentId: 'base', baseRevision: 'working-tree', active: false }] };
   const result = async () => state;
   const fileEditState = (status?: EditSummary['status']): FileEditState => ({ edits: fileEdits.map((edit) => ({ ...edit, status })), workingCode, valid: true });
   return {
     getCurrentState: result,
     getRevisionContext: async () => ({ branch: 'main', currentCommit: 'abc1234', options: [{ kind: 'branch', ref: 'main', hash: 'abc1234', shortHash: 'abc1234', date: '2026-09-14T13:29:59-04:00', subject: 'latest change' }] }),
+    promoteHumanBuild: async () => ({ branch: 'main', currentCommit: 'abc1234', options: [] }),
     openProgram: result,
     chooseDirectory: async () => '/tmp/selected-program',
     startOpenCode: async () => undefined,
@@ -27,6 +29,22 @@ function fakeEngine(initialState?: HeadlessState, fileEdits: EditSummary[] = [{ 
     },
     getFileEdits: async () => fileEdits,
     getFileEditState: async () => fileEditState(),
+    getProposalBranches: async () => proposalWorkspace,
+    createProposalBranch: async () => {
+      proposalWorkspace = { activeBranchId: 'proposal-1', selectedProposalIds: [], branches: [{ id: 'base', name: 'Base', kind: 'base', baseRevision: 'working-tree', active: false }, { id: 'human', name: 'Human build', kind: 'human', parentId: 'base', baseRevision: 'working-tree', active: false }, { id: 'proposal-1', name: 'Proposal 1', kind: 'proposal', parentId: 'base', baseRevision: 'working-tree', sourceRevision: 'abc1234', active: true }] };
+      return proposalWorkspace;
+    },
+    selectProposalBranch: async (_directory, _current, _compare, branchId) => {
+      proposalWorkspace = { ...proposalWorkspace, activeBranchId: branchId, branches: proposalWorkspace.branches.map((branch) => ({ ...branch, active: branch.id === branchId })) };
+      return proposalWorkspace;
+    },
+    selectProposalBranches: async (_directory, _base, branchIds) => {
+      proposalWorkspace = { ...proposalWorkspace, selectedProposalIds: branchIds };
+      return proposalWorkspace;
+    },
+    getProposalFileEditState: async () => fileEditState(),
+    getHumanFileEditState: async () => fileEditState(),
+    copyProposalEdit: async () => fileEditState('applied'),
     getComparisonFiles: async () => [],
     applyFileEdit: async () => fileEditState('applied'),
     applyFileEditSubtree: async () => fileEditState('applied'),
@@ -167,12 +185,19 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'function main' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Format' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open source' })).toBeInTheDocument();
-    expect(document.querySelectorAll('.edit-location').length).toBeGreaterThan(0);
+    await waitFor(() => expect(document.querySelectorAll('.edit-location').length).toBeGreaterThan(0));
     await waitFor(() => expect(screen.getAllByText('package main').length).toBeGreaterThan(1));
     fireEvent.click(screen.getByRole('button', { name: 'Open source' }));
     expect(await screen.findAllByText('main.go')).toHaveLength(2);
     expect(screen.queryByText('Structural edits (1)')).not.toBeInTheDocument();
     expect(openedFile).toBe('');
+  });
+
+  it('creates and selects independent proposal targets', async () => {
+    render(<App providedEngine={fakeEngine()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate proposal edits' }));
+    expect(await screen.findByRole('tab', { name: /Proposal 1/ })).toBeInTheDocument();
   });
 
   it('formats TSX with Prettier when the Format button is pressed', async () => {
@@ -219,6 +244,41 @@ describe('App', () => {
     expect(tree).toHaveLength(1);
     expect(tree[0].id).toBe('assignment');
     expect(tree[0].children.map((node) => node.id)).toEqual(['lhs', 'rhs']);
+  });
+
+  it('collapses non-actionable ancestor chains to the nearest shared parent', () => {
+    const tree = buildComparisonTree([
+      { index: 0, kind: 'UPDATE', nodeId: 'left', nodeKind: '*ast.BasicLit', position: 0, ancestors: [
+        { nodeId: 'file', nodeKind: '*ast.File' },
+        { nodeId: 'function', nodeKind: '*ast.FuncDecl' },
+        { nodeId: 'body', nodeKind: '*ast.BlockStmt' },
+      ] },
+      { index: 1, kind: 'UPDATE', nodeId: 'right', nodeKind: '*ast.BasicLit', position: 1, ancestors: [
+        { nodeId: 'file', nodeKind: '*ast.File' },
+        { nodeId: 'function', nodeKind: '*ast.FuncDecl' },
+        { nodeId: 'body', nodeKind: '*ast.BlockStmt' },
+      ] },
+    ]);
+    expect(tree).toHaveLength(1);
+    expect(tree[0].id).toBe('body');
+    expect(tree[0].children.map((node) => node.id)).toEqual(['left', 'right']);
+  });
+
+  it('keeps one nearest parent for a single actionable edit', () => {
+    const tree = buildComparisonTree([{
+      index: 0,
+      kind: 'UPDATE',
+      nodeId: 'value',
+      nodeKind: '*ast.BasicLit',
+      position: 0,
+      ancestors: [
+        { nodeId: 'file', nodeKind: '*ast.File' },
+        { nodeId: 'assignment', nodeKind: '*ast.AssignStmt' },
+      ],
+    }]);
+    expect(tree).toHaveLength(1);
+    expect(tree[0].id).toBe('assignment');
+    expect(tree[0].children[0].id).toBe('value');
   });
 
   it('scopes declaration trees to descendants and excludes file parents', () => {

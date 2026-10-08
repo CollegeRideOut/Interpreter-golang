@@ -23,6 +23,71 @@ func TestParseTypeScriptBuildsEditableTree(t *testing.T) {
 	}
 }
 
+func TestProjectTypeScriptHidesSyntaxShells(t *testing.T) {
+	state, err := engine.NewWorkingStateFromTypeScript(
+		[]byte("const answer = 41;\n"),
+		[]byte("function greet(name: string) { return name; }\n"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := state.Snapshot()
+	hiddenKinds := map[string]bool{
+		"typescript:program":           true,
+		"typescript:formal_parameters": true,
+		"typescript:statement_block":   true,
+		"typescript:(":                 true,
+		"typescript:)":                 true,
+		"typescript:{":                 true,
+		"typescript:}":                 true,
+		"typescript::":                 true,
+		"typescript:;":                 true,
+	}
+	views := engine.ProjectEdits(snapshot.Edits, engine.LiftOptions{HiddenKinds: hiddenKinds})
+	visible := make(map[string]bool)
+	for _, view := range views {
+		visible[snapshot.Edits[view.EditIndex].NodeKind] = true
+	}
+	for kind := range hiddenKinds {
+		if visible[kind] {
+			t.Fatalf("syntax shell %q remained visible", kind)
+		}
+	}
+	if !visible["typescript:function_declaration"] {
+		t.Fatalf("semantic function declaration was lifted out of the projection")
+	}
+}
+
+func TestTypeScriptImportDiffPreservesExistingIdentifiers(t *testing.T) {
+	state, err := engine.NewWorkingStateFromTypeScript(
+		[]byte("import { Kysely, SqliteDialect } from 'kysely';\n"),
+		[]byte("import { Generated, Kysely, Migrator, SqliteDialect } from 'kysely';\n"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updates := make(map[string]int)
+	inserts := make(map[string]int)
+	for _, edit := range state.Snapshot().Edits {
+		if edit.NodeKind != "typescript:identifier" {
+			continue
+		}
+		switch edit.Kind {
+		case "UPDATE":
+			updates[edit.Value]++
+		case "INSERT":
+			inserts[edit.Value]++
+		}
+	}
+	if len(updates) != 0 {
+		t.Fatalf("existing import identifiers were reported as updates: %v", updates)
+	}
+	if inserts["Generated"] == 0 || inserts["Migrator"] == 0 {
+		t.Fatalf("missing inserted import identifiers: %v", inserts)
+	}
+}
+
 func TestTypeScriptDiffAndApply(t *testing.T) {
 	source := []byte("const answer: number = 41;\n")
 	target := []byte("const answer: number = 42;\n")
@@ -182,6 +247,74 @@ func TestTypeScriptDiffIncludesInsertedDeclaration(t *testing.T) {
 	}
 }
 
+func TestTypeScriptParameterEditHidesSyntaxAndAppliesCompleteParameter(t *testing.T) {
+	source := []byte("function greet(name: string) { return name; }\n")
+	target := []byte("function greet(name: string, age: number) { return name; }\n")
+	state, err := engine.NewWorkingStateFromTypeScript(source, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parameterIndex := -1
+	for index, edit := range state.Snapshot().Edits {
+		if edit.NodeKind == "typescript:required_parameter" {
+			parameterIndex = index
+		}
+		if edit.Hidden {
+			if edit.NodeKind != "typescript:," && edit.NodeKind != "typescript::" {
+				t.Fatalf("unexpected hidden edit %q", edit.NodeKind)
+			}
+		}
+	}
+	if parameterIndex < 0 {
+		t.Fatal("expected inserted parameter edit")
+	}
+	if err := state.ApplyProjected(parameterIndex, engine.ApplyOptions{Reconcile: true}, engine.LiftOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if report := state.Validate(); !report.Valid {
+		t.Fatalf("projected parameter is invalid: %v\n%s", report.Diagnostics, state.Snapshot().RenderedCode)
+	}
+	if got := state.Snapshot().RenderedCode; !strings.Contains(got, "name: string, age: number") {
+		t.Fatalf("complete parameter syntax was not applied:\n%s", got)
+	}
+}
+
+func TestProposalOperationTransfersParameterToHumanBuild(t *testing.T) {
+	base := []byte("function greet(name: string) { return name; }\n")
+	proposal := []byte("function greet(name: string, age: number) { return name; }\n")
+	proposalState, err := engine.NewWorkingStateFromTypeScript(base, proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	humanState, err := engine.NewWorkingStateFromTypeScript(base, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := -1
+	for editIndex, edit := range proposalState.Snapshot().Edits {
+		if edit.NodeKind == "typescript:required_parameter" {
+			index = editIndex
+			break
+		}
+	}
+	if index < 0 {
+		t.Fatal("expected proposal parameter edit")
+	}
+	operations, err := proposalState.ProposalOperationsForSubtree(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := humanState.ApplyProposalOperations(operations); err != nil {
+		t.Fatal(err)
+	}
+	if report := humanState.Validate(); !report.Valid {
+		t.Fatalf("human build is invalid: %v\n%s", report.Diagnostics, humanState.Snapshot().RenderedCode)
+	}
+	if got := humanState.Snapshot().RenderedCode; !strings.Contains(got, "name: string, age: number") {
+		t.Fatalf("proposal parameter was not transferred:\n%s", got)
+	}
+}
+
 func TestTypeScriptAppliedInterfacePropertiesRemainSeparated(t *testing.T) {
 	source := []byte("interface Schema {\n  health: { id: number };\n}\n")
 	target := []byte("interface Schema {\n  health: { id: number };\n  books: {\n    id: Generated<number>;\n    author: string;\n    title: string;\n    path: string;\n  };\n}\n")
@@ -264,6 +397,42 @@ func TestHTMLInsertionsApplyFromEmptySource(t *testing.T) {
 	want := "<html>\n  <body>\n    <div id=\"root\"></div>\n  </body>\n</html>"
 	if got := strings.TrimSpace(state.Snapshot().RenderedCode); got != want {
 		t.Fatalf("applied HTML insertions = %q", got)
+	}
+}
+
+func TestHTMLElementEditHidesTagDelimiters(t *testing.T) {
+	state, err := engine.NewWorkingStateFromLanguage("html", nil, []byte("<html><body><div id=\"root\"></div></body></html>\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	elementIndex := -1
+	hiddenStartTag := false
+	hiddenEndTag := false
+	for index, edit := range state.Snapshot().Edits {
+		if edit.NodeKind == "html:element" && edit.Node != nil && edit.Node.StartByte == 0 {
+			elementIndex = index
+		}
+		if edit.NodeKind == "html:start_tag" {
+			hiddenStartTag = edit.Hidden
+		}
+		if edit.NodeKind == "html:end_tag" {
+			hiddenEndTag = edit.Hidden
+		}
+		if edit.Hidden && edit.NodeKind != "html:<" && edit.NodeKind != "html:>" && edit.NodeKind != "html:/" && edit.NodeKind != "html:=" && edit.NodeKind != "html:start_tag" && edit.NodeKind != "html:end_tag" && edit.NodeKind != "html:tag_name" {
+			t.Fatalf("unexpected hidden HTML edit %q", edit.NodeKind)
+		}
+	}
+	if elementIndex < 0 {
+		t.Fatal("expected inserted HTML element edit")
+	}
+	if !hiddenStartTag || !hiddenEndTag {
+		t.Fatal("expected HTML start and end tags to be renderer-owned")
+	}
+	if err := state.ApplyProjected(elementIndex, engine.ApplyOptions{Reconcile: true}, engine.LiftOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Snapshot().RenderedCode; !strings.Contains(got, "<html>") || !strings.Contains(got, "</html>") {
+		t.Fatalf("complete HTML element was not applied:\n%s", got)
 	}
 }
 

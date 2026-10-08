@@ -32,6 +32,11 @@ new branch of the working state.
 - Same-package reference and type links that open related files.
 - Calorie-counter multi-package fixture in `TestProgramCalorieApp/`.
 - Structural contract and agent-loop direction documented, but not implemented.
+- First proposal-branch slice: immutable base plus independent proposal working
+  states seeded from the current-to-compare structural diff.
+- Proposal branch selection and branch-local apply/remove state in the desktop UI.
+- Proposal review mode: select multiple proposal targets from one shared base and
+  accept their structural edits into a persistent Human build.
 
 ## Current UI Reality
 
@@ -59,6 +64,7 @@ Not yet implemented reliably:
 - Agent/ACP edit loops.
 - Durable inquiry paths and cycle handling.
 - Edit-evolution timeline connected to affected-code relationships.
+- Proposal conflict detection and automatic composition.
 
 ## Recommended Next Session
 

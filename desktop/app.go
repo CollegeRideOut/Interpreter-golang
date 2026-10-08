@@ -32,6 +32,7 @@ type App struct {
 	revisionMu       sync.Mutex
 	revisionRoot     string
 	comparisonStates map[string]*engine.WorkingState
+	proposalSessions map[string]*proposalSession
 	terminalMu       sync.Mutex
 	terminal         *os.File
 	terminalCommand  *exec.Cmd
@@ -117,14 +118,47 @@ type EditSummary struct {
 }
 
 type FileEditState struct {
-	Edits             []EditSummary `json:"edits"`
-	LiftedEdits       []EditSummary `json:"liftedEdits,omitempty"`
-	WorkingCode       string        `json:"workingCode"`
-	TargetCode        string        `json:"targetCode,omitempty"`
-	TargetDiagnostics []string      `json:"targetDiagnostics,omitempty"`
-	RenderDiagnostics []string      `json:"renderDiagnostics,omitempty"`
-	Diagnostics       []string      `json:"diagnostics,omitempty"`
-	Valid             bool          `json:"valid"`
+	Edits                []EditSummary `json:"edits"`
+	LiftedEdits          []EditSummary `json:"liftedEdits,omitempty"`
+	WorkingCode          string        `json:"workingCode"`
+	TargetCode           string        `json:"targetCode,omitempty"`
+	TargetDiagnostics    []string      `json:"targetDiagnostics,omitempty"`
+	RenderDiagnostics    []string      `json:"renderDiagnostics,omitempty"`
+	Diagnostics          []string      `json:"diagnostics,omitempty"`
+	Valid                bool          `json:"valid"`
+	BranchID             string        `json:"branchId,omitempty"`
+	WorkingAuthoritative bool          `json:"workingAuthoritative,omitempty"`
+}
+
+type ProposalBranchSummary struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Kind           string `json:"kind"`
+	ParentID       string `json:"parentId,omitempty"`
+	BaseRevision   string `json:"baseRevision"`
+	SourceRevision string `json:"sourceRevision,omitempty"`
+	Active         bool   `json:"active"`
+}
+
+type ProposalWorkspace struct {
+	ActiveBranchID      string                  `json:"activeBranchId"`
+	SelectedProposalIDs []string                `json:"selectedProposalIds,omitempty"`
+	Branches            []ProposalBranchSummary `json:"branches"`
+}
+
+type proposalBranch struct {
+	ProposalBranchSummary
+	states map[string]*engine.WorkingState
+	stable bool
+}
+
+type proposalSession struct {
+	activeBranchID  string
+	selected        map[string]bool
+	branches        map[string]*proposalBranch
+	nextBranch      int
+	rebaseProposals bool
+	humanStates     map[string]*engine.WorkingState
 }
 
 func liftOptions(hiddenKinds []string) engine.LiftOptions {
@@ -136,12 +170,22 @@ func liftOptions(hiddenKinds []string) engine.LiftOptions {
 }
 
 func defaultHiddenKinds() []string {
-	return []string{"*ast.BlockStmt", "*ast.ExprStmt", "*ast.DeclStmt", "*ast.ImportSpec", "*ast.FieldList", "*ast.Field"}
+	return []string{
+		"*ast.BlockStmt", "*ast.ExprStmt", "*ast.DeclStmt", "*ast.ImportSpec", "*ast.FieldList", "*ast.Field",
+		"typescript:program", "typescript:formal_parameters", "typescript:statement_block", "typescript:interface_body",
+		"typescript:class_body", "typescript:named_imports", "typescript:import_clause", "typescript:namespace_import",
+		"typescript:type_arguments", "typescript:arguments", "typescript:object", "typescript:array", "typescript:object_type",
+		"typescript:type_annotation",
+		"typescript:(", "typescript:)", "typescript:{", "typescript:}", "typescript:[", "typescript:]", "typescript:,", "typescript:;",
+		"typescript::", "typescript:.", "typescript:?.", "typescript:=>", "typescript:...", "typescript:from",
+		"typescript:import", "typescript:export", "typescript:const", "typescript:let", "typescript:var", "typescript:async",
+		"typescript:await", "typescript:new", "typescript:if", "typescript:else", "typescript:throw", "typescript:return",
+	}
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
-	return &App{workspace: headless.New(), comparisonStates: make(map[string]*engine.WorkingState)}
+	return &App{workspace: headless.New(), comparisonStates: make(map[string]*engine.WorkingState), proposalSessions: make(map[string]*proposalSession)}
 }
 
 // startup is called at application startup
@@ -172,6 +216,7 @@ func (a *App) OpenProgram(directory string) (ProgramSnapshot, error) {
 	a.target = nil
 	a.state = nil
 	a.comparisonStates = make(map[string]*engine.WorkingState)
+	a.proposalSessions = make(map[string]*proposalSession)
 	imports := make(map[string]bool)
 	for _, pkg := range packages {
 		for _, imported := range pkg.LocalImports {
@@ -346,6 +391,7 @@ func (a *App) SelectRevision(directory, revision string) (headless.State, error)
 	a.target = nil
 	a.state = nil
 	a.comparisonStates = make(map[string]*engine.WorkingState)
+	a.proposalSessions = make(map[string]*proposalSession)
 	state, err := a.headlessWorkspace().OpenProgramAt(absolute, root)
 	if err != nil {
 		os.RemoveAll(root)
@@ -361,6 +407,8 @@ func (a *App) SelectRevision(directory, revision string) (headless.State, error)
 // GetFileEdits returns structural edits needed to transform currentRevision
 // into compareRevision for one file. It does not apply or persist anything.
 func (a *App) GetFileEdits(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string) ([]EditSummary, error) {
+	a.revisionMu.Lock()
+	defer a.revisionMu.Unlock()
 	absolute, err := filepath.Abs(directory)
 	if err != nil {
 		return nil, err
@@ -376,6 +424,8 @@ func (a *App) GetFileEdits(directory, currentRevision, compareRevision, packageD
 }
 
 func (a *App) GetFileEditState(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string) (FileEditState, error) {
+	a.revisionMu.Lock()
+	defer a.revisionMu.Unlock()
 	absolute, err := filepath.Abs(directory)
 	if err != nil {
 		return FileEditState{}, err
@@ -384,7 +434,7 @@ func (a *App) GetFileEditState(directory, currentRevision, compareRevision, pack
 	if err != nil {
 		return FileEditState{}, err
 	}
-	return summarizeComparisonState(state), nil
+	return a.summarizeActiveComparisonState(absolute, currentRevision, compareRevision, state), nil
 }
 
 // GetComparisonFiles returns the union of supported files present in either
@@ -446,6 +496,218 @@ func comparisonKey(directory, currentRevision, compareRevision, packageDirectory
 	return strings.Join([]string{directory, currentRevision, compareRevision, packageDirectory, packageName, filePath}, "\x00")
 }
 
+func proposalSessionKey(directory, currentRevision, compareRevision string) string {
+	// Proposals belong to a shared base, not to one linear Compare to choice.
+	return strings.Join([]string{directory, currentRevision}, "\x00")
+}
+
+func (a *App) ensureProposalSession(directory, currentRevision, compareRevision string) *proposalSession {
+	if a.proposalSessions == nil {
+		a.proposalSessions = make(map[string]*proposalSession)
+	}
+	key := proposalSessionKey(directory, currentRevision, compareRevision)
+	if session := a.proposalSessions[key]; session != nil {
+		return session
+	}
+	session := &proposalSession{
+		activeBranchID: "base",
+		branches:       make(map[string]*proposalBranch),
+		selected:       make(map[string]bool),
+	}
+	session.branches["base"] = &proposalBranch{
+		ProposalBranchSummary: ProposalBranchSummary{ID: "base", Name: "Base diff", Kind: "base", BaseRevision: currentRevision, SourceRevision: compareRevision, Active: true},
+		states:                make(map[string]*engine.WorkingState),
+	}
+	session.branches["human"] = &proposalBranch{
+		ProposalBranchSummary: ProposalBranchSummary{ID: "human", Name: "Human build", Kind: "human", ParentID: "base", BaseRevision: currentRevision, SourceRevision: currentRevision},
+		states:                make(map[string]*engine.WorkingState),
+	}
+	a.proposalSessions[key] = session
+	return session
+}
+
+func proposalWorkspace(session *proposalSession) ProposalWorkspace {
+	branches := make([]ProposalBranchSummary, 0, len(session.branches))
+	for _, branch := range session.branches {
+		branch.Active = branch.ID == session.activeBranchID
+		branches = append(branches, branch.ProposalBranchSummary)
+	}
+	sort.Slice(branches, func(left, right int) bool {
+		if branches[left].ID == "base" {
+			return true
+		}
+		if branches[right].ID == "base" {
+			return false
+		}
+		if branches[left].ID == "human" {
+			return true
+		}
+		if branches[right].ID == "human" {
+			return false
+		}
+		return branches[left].ID < branches[right].ID
+	})
+	selected := make([]string, 0, len(session.selected))
+	for id := range session.selected {
+		selected = append(selected, id)
+	}
+	sort.Strings(selected)
+	return ProposalWorkspace{ActiveBranchID: session.activeBranchID, SelectedProposalIDs: selected, Branches: branches}
+}
+
+// GetProposalBranches returns the base and proposal branches for a comparison.
+func (a *App) GetProposalBranches(directory, currentRevision, compareRevision string) (ProposalWorkspace, error) {
+	a.revisionMu.Lock()
+	defer a.revisionMu.Unlock()
+	absolute, err := filepath.Abs(directory)
+	if err != nil {
+		return ProposalWorkspace{}, err
+	}
+	return proposalWorkspace(a.ensureProposalSession(absolute, currentRevision, compareRevision)), nil
+}
+
+// CreateProposalBranch forks a new proposal from the immutable base branch.
+func (a *App) CreateProposalBranch(directory, currentRevision, compareRevision, proposalRevision, name string) (ProposalWorkspace, error) {
+	a.revisionMu.Lock()
+	defer a.revisionMu.Unlock()
+	absolute, err := filepath.Abs(directory)
+	if err != nil {
+		return ProposalWorkspace{}, err
+	}
+	session := a.ensureProposalSession(absolute, currentRevision, compareRevision)
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ProposalWorkspace{}, fmt.Errorf("proposal name is required")
+	}
+	if proposalRevision == "" || proposalRevision == currentRevision {
+		return ProposalWorkspace{}, fmt.Errorf("proposal source revision is required")
+	}
+	session.nextBranch++
+	id := fmt.Sprintf("proposal-%d", session.nextBranch)
+	branch := &proposalBranch{
+		ProposalBranchSummary: ProposalBranchSummary{ID: id, Name: name, Kind: "proposal", ParentID: "base", BaseRevision: currentRevision, SourceRevision: proposalRevision},
+		states:                make(map[string]*engine.WorkingState),
+	}
+	session.branches[id] = branch
+	session.activeBranchID = id
+	return proposalWorkspace(session), nil
+}
+
+// SelectProposalBranch switches the active branch without changing the base.
+func (a *App) SelectProposalBranch(directory, currentRevision, compareRevision, branchID string) (ProposalWorkspace, error) {
+	a.revisionMu.Lock()
+	defer a.revisionMu.Unlock()
+	absolute, err := filepath.Abs(directory)
+	if err != nil {
+		return ProposalWorkspace{}, err
+	}
+	session := a.ensureProposalSession(absolute, currentRevision, compareRevision)
+	if _, ok := session.branches[branchID]; !ok {
+		return ProposalWorkspace{}, fmt.Errorf("proposal branch %q does not exist", branchID)
+	}
+	session.activeBranchID = branchID
+	return proposalWorkspace(session), nil
+}
+
+// SelectProposalBranches selects independent proposal targets for review.
+func (a *App) SelectProposalBranches(directory, baseRevision string, branchIDs []string) (ProposalWorkspace, error) {
+	a.revisionMu.Lock()
+	defer a.revisionMu.Unlock()
+	absolute, err := filepath.Abs(directory)
+	if err != nil {
+		return ProposalWorkspace{}, err
+	}
+	session := a.ensureProposalSession(absolute, baseRevision, "")
+	session.selected = make(map[string]bool)
+	for _, branchID := range branchIDs {
+		branch := session.branches[branchID]
+		if branch == nil || branch.Kind != "proposal" {
+			return ProposalWorkspace{}, fmt.Errorf("proposal branch %q does not exist", branchID)
+		}
+		session.selected[branchID] = true
+	}
+	if len(branchIDs) > 0 {
+		session.activeBranchID = branchIDs[0]
+	}
+	return proposalWorkspace(session), nil
+}
+
+// GetProposalFileEditState returns one proposal's diff against the shared base.
+func (a *App) GetProposalFileEditState(directory, baseRevision, proposalID, packageDirectory, packageName, filePath string) (FileEditState, error) {
+	a.revisionMu.Lock()
+	defer a.revisionMu.Unlock()
+	absolute, err := filepath.Abs(directory)
+	if err != nil {
+		return FileEditState{}, err
+	}
+	state, err := a.comparisonStateForBranch(absolute, baseRevision, "", packageDirectory, packageName, filePath, proposalID)
+	if err != nil {
+		return FileEditState{}, err
+	}
+	result := summarizeComparisonState(state)
+	result.BranchID = proposalID
+	return result, nil
+}
+
+// GetHumanFileEditState returns the current human build against the shared base.
+func (a *App) GetHumanFileEditState(directory, baseRevision, packageDirectory, packageName, filePath string) (FileEditState, error) {
+	a.revisionMu.Lock()
+	defer a.revisionMu.Unlock()
+	absolute, err := filepath.Abs(directory)
+	if err != nil {
+		return FileEditState{}, err
+	}
+	state, err := a.comparisonStateForBranch(absolute, baseRevision, "", packageDirectory, packageName, filePath, "human")
+	if err != nil {
+		return FileEditState{}, err
+	}
+	result := summarizeComparisonState(state)
+	result.BranchID = "human"
+	result.WorkingAuthoritative = true
+	return result, nil
+}
+
+// CopyProposalEdit transfers one proposal edit into the human build branch.
+func (a *App) CopyProposalEdit(directory, currentRevision, compareRevision, proposalID, packageDirectory, packageName, filePath string, index int) (FileEditState, error) {
+	a.revisionMu.Lock()
+	defer a.revisionMu.Unlock()
+	absolute, err := filepath.Abs(directory)
+	if err != nil {
+		return FileEditState{}, err
+	}
+	source, err := a.comparisonStateForBranch(absolute, currentRevision, compareRevision, packageDirectory, packageName, filePath, proposalID)
+	if err != nil {
+		return FileEditState{}, err
+	}
+	human, err := a.comparisonStateForBranch(absolute, currentRevision, compareRevision, packageDirectory, packageName, filePath, "human")
+	if err != nil {
+		return FileEditState{}, err
+	}
+	operations, err := source.ProposalOperationsForSubtree(index)
+	if err != nil {
+		return FileEditState{}, err
+	}
+	if err := human.ApplyProposalOperations(operations); err != nil {
+		return FileEditState{}, err
+	}
+	session := a.ensureProposalSession(absolute, currentRevision, compareRevision)
+	session.rebaseProposals = true
+	if session.humanStates == nil {
+		session.humanStates = make(map[string]*engine.WorkingState)
+	}
+	session.humanStates[strings.Join([]string{packageDirectory, packageName, filePath}, "\x00")] = human
+	session.branches[proposalID].stable = true
+	for _, branch := range session.branches {
+		if (branch.Kind == "proposal" && !branch.stable) || branch.Kind == "human" {
+			branch.states = make(map[string]*engine.WorkingState)
+		}
+	}
+	result := summarizeComparisonState(human)
+	result.BranchID = "human"
+	result.WorkingAuthoritative = true
+	return result, nil
+}
+
 func languageForFile(filePath string) string {
 	switch strings.ToLower(filepath.Ext(filePath)) {
 	case ".ts":
@@ -458,7 +720,7 @@ func languageForFile(filePath string) string {
 	return "go"
 }
 
-func (a *App) comparisonState(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string) (*engine.WorkingState, error) {
+func (a *App) baseComparisonState(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string) (*engine.WorkingState, error) {
 	if a.comparisonStates == nil {
 		a.comparisonStates = make(map[string]*engine.WorkingState)
 	}
@@ -484,6 +746,81 @@ func (a *App) comparisonState(directory, currentRevision, compareRevision, packa
 	}
 	a.comparisonStates[key] = state
 	return state, nil
+}
+
+func (a *App) comparisonState(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string) (*engine.WorkingState, error) {
+	session := a.ensureProposalSession(directory, currentRevision, compareRevision)
+	return a.comparisonStateForBranch(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, session.activeBranchID)
+}
+
+func (a *App) comparisonStateForBranch(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, branchID string) (*engine.WorkingState, error) {
+	session := a.ensureProposalSession(directory, currentRevision, compareRevision)
+	key := comparisonKey(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath)
+	branch := session.branches[branchID]
+	if branch == nil {
+		return nil, fmt.Errorf("proposal branch %q does not exist", branchID)
+	}
+	if branch.Kind == "base" {
+		return a.baseComparisonState(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath)
+	}
+	if state := branch.states[key]; state != nil {
+		return state, nil
+	}
+	if branch.Kind == "human" {
+		if session.rebaseProposals {
+			humanKey := strings.Join([]string{packageDirectory, packageName, filePath}, "\x00")
+			if human := session.humanStates[humanKey]; human != nil {
+				branch.states[key] = human
+				return human, nil
+			}
+		}
+		current, exists, err := revisionFileBytesOptional(directory, currentRevision, filePath)
+		if err != nil {
+			return nil, err
+		}
+		if !exists && languageForFile(filePath) == "go" {
+			return nil, fmt.Errorf("cannot compare missing Go file %s", filePath)
+		}
+		branch.states[key], err = engine.NewWorkingStateFromLanguage(languageForFile(filePath), current, current)
+		if err != nil {
+			return nil, fmt.Errorf("create human proposal state %s: %w", filePath, err)
+		}
+		return branch.states[key], nil
+	}
+	var base []byte
+	var exists bool
+	var err error
+	if session.rebaseProposals && !branch.stable {
+		humanKey := strings.Join([]string{packageDirectory, packageName, filePath}, "\x00")
+		human := session.humanStates[humanKey]
+		if human == nil {
+			var humanErr error
+			human, humanErr = a.comparisonStateForBranch(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, "human")
+			if humanErr != nil {
+				return nil, humanErr
+			}
+		}
+		humanSnapshot := human.Snapshot()
+		base = []byte(humanSnapshot.RenderedCode)
+		exists = true
+	} else {
+		base, exists, err = revisionFileBytesOptional(directory, currentRevision, filePath)
+		if err != nil {
+			return nil, err
+		}
+	}
+	proposal, proposalExists, err := revisionFileBytesOptional(directory, branch.SourceRevision, filePath)
+	if err != nil {
+		return nil, err
+	}
+	if (!exists || !proposalExists) && languageForFile(filePath) == "go" {
+		return nil, fmt.Errorf("cannot compare missing Go file %s", filePath)
+	}
+	branch.states[key], err = engine.NewWorkingStateFromLanguage(languageForFile(filePath), base, proposal)
+	if err != nil {
+		return nil, fmt.Errorf("compare proposal %s: %w", filePath, err)
+	}
+	return branch.states[key], nil
 }
 
 func revisionFileBytesOptional(directory, revision, filePath string) ([]byte, bool, error) {
@@ -521,6 +858,9 @@ func summarizeComparisonState(state *engine.WorkingState) FileEditState {
 	}
 	all := make([]EditSummary, 0, len(snapshot.Edits))
 	for index := range snapshot.Edits {
+		if snapshot.Edits[index].Hidden {
+			continue
+		}
 		all = append(all, summarize(index))
 	}
 	lifted := make([]EditSummary, 0, len(views))
@@ -530,7 +870,17 @@ func summarizeComparisonState(state *engine.WorkingState) FileEditState {
 	return FileEditState{Edits: all, LiftedEdits: lifted, WorkingCode: snapshot.RenderedCode, TargetCode: target.Code, TargetDiagnostics: target.Diagnostics, RenderDiagnostics: snapshot.RenderDiagnostics, Diagnostics: validation.Diagnostics, Valid: validation.Valid}
 }
 
+func (a *App) summarizeActiveComparisonState(directory, currentRevision, compareRevision string, state *engine.WorkingState) FileEditState {
+	result := summarizeComparisonState(state)
+	session := a.ensureProposalSession(directory, currentRevision, compareRevision)
+	result.BranchID = session.activeBranchID
+	result.WorkingAuthoritative = session.activeBranchID == "human"
+	return result
+}
+
 func (a *App) ApplyFileEdit(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string, index int) (FileEditState, error) {
+	a.revisionMu.Lock()
+	defer a.revisionMu.Unlock()
 	absolute, err := filepath.Abs(directory)
 	if err != nil {
 		return FileEditState{}, err
@@ -542,11 +892,13 @@ func (a *App) ApplyFileEdit(directory, currentRevision, compareRevision, package
 	if err := state.ApplyProjected(index, engine.ApplyOptions{Reconcile: true}, liftOptions(defaultHiddenKinds())); err != nil {
 		return FileEditState{}, err
 	}
-	return summarizeComparisonState(state), nil
+	return a.summarizeActiveComparisonState(absolute, currentRevision, compareRevision, state), nil
 }
 
 // ApplyFileEditSubtree applies an edit and all of its dependent child edits.
 func (a *App) ApplyFileEditSubtree(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string, index int) (FileEditState, error) {
+	a.revisionMu.Lock()
+	defer a.revisionMu.Unlock()
 	absolute, err := filepath.Abs(directory)
 	if err != nil {
 		return FileEditState{}, err
@@ -555,16 +907,17 @@ func (a *App) ApplyFileEditSubtree(directory, currentRevision, compareRevision, 
 	if err != nil {
 		return FileEditState{}, err
 	}
-	// Full-line actions apply the selected AST subtree without implicitly
-	// reconciling every target descendant. Descendants stay independently
-	// removable when the parent is rebuilt.
-	if err := state.ApplyProjectedSubtree(index, engine.ApplyOptions{Reconcile: false}, liftOptions(defaultHiddenKinds())); err != nil {
+	// Full-line actions must leave a valid projected tree. Reconciliation keeps
+	// structural children attached when the sequence applies adjacent edits.
+	if err := state.ApplyProjectedSubtree(index, engine.ApplyOptions{Reconcile: true}, liftOptions(defaultHiddenKinds())); err != nil {
 		return FileEditState{}, err
 	}
-	return summarizeComparisonState(state), nil
+	return a.summarizeActiveComparisonState(absolute, currentRevision, compareRevision, state), nil
 }
 
 func (a *App) RemoveFileEdit(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string, index int) (FileEditState, error) {
+	a.revisionMu.Lock()
+	defer a.revisionMu.Unlock()
 	absolute, err := filepath.Abs(directory)
 	if err != nil {
 		return FileEditState{}, err
@@ -576,11 +929,13 @@ func (a *App) RemoveFileEdit(directory, currentRevision, compareRevision, packag
 	if err := state.RemoveProjected(index, liftOptions(defaultHiddenKinds())); err != nil {
 		return FileEditState{}, err
 	}
-	return summarizeComparisonState(state), nil
+	return a.summarizeActiveComparisonState(absolute, currentRevision, compareRevision, state), nil
 }
 
 // RemoveFileEditSubtree removes an edit and all of its dependent child edits.
 func (a *App) RemoveFileEditSubtree(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath string, index int) (FileEditState, error) {
+	a.revisionMu.Lock()
+	defer a.revisionMu.Unlock()
 	absolute, err := filepath.Abs(directory)
 	if err != nil {
 		return FileEditState{}, err
@@ -592,7 +947,7 @@ func (a *App) RemoveFileEditSubtree(directory, currentRevision, compareRevision,
 	if err := state.RemoveProjectedSubtree(index, liftOptions(defaultHiddenKinds())); err != nil {
 		return FileEditState{}, err
 	}
-	return summarizeComparisonState(state), nil
+	return a.summarizeActiveComparisonState(absolute, currentRevision, compareRevision, state), nil
 }
 
 func revisionFileBytes(directory, revision, filePath string) ([]byte, error) {
@@ -664,6 +1019,10 @@ func (a *App) GetRevisionContext(directory string) (RevisionContext, error) {
 	if err != nil {
 		return RevisionContext{}, err
 	}
+	return a.revisionContext(absolute)
+}
+
+func (a *App) revisionContext(absolute string) (RevisionContext, error) {
 	gitRoot, err := gitOutput(absolute, "rev-parse", "--show-toplevel")
 	if err != nil || filepath.Clean(gitRoot) != filepath.Clean(absolute) {
 		return RevisionContext{}, fmt.Errorf("program directory is not an independent Git repository")
@@ -705,6 +1064,75 @@ func (a *App) GetRevisionContext(directory string) (RevisionContext, error) {
 		options = append(options, RevisionOption{Kind: "commit", Ref: parts[0], Hash: parts[0], ShortHash: parts[1], Date: parts[2], Author: parts[3], Subject: parts[4]})
 	}
 	return RevisionContext{Branch: strings.TrimSpace(branch), CurrentCommit: strings.TrimSpace(commit), Options: options}, nil
+}
+
+// PromoteHumanBuild writes the in-memory Human build into the repository and
+// records it as a commit on the currently checked-out branch.
+func (a *App) PromoteHumanBuild(directory, currentRevision, message string) (RevisionContext, error) {
+	a.revisionMu.Lock()
+	defer a.revisionMu.Unlock()
+	absolute, err := filepath.Abs(directory)
+	if err != nil {
+		return RevisionContext{}, err
+	}
+	if _, err := gitOutput(absolute, "rev-parse", "--show-toplevel"); err != nil {
+		return RevisionContext{}, fmt.Errorf("commit Human build: %w", err)
+	}
+	branch, err := gitOutput(absolute, "symbolic-ref", "--short", "-q", "HEAD")
+	if err != nil || strings.TrimSpace(branch) == "" {
+		return RevisionContext{}, fmt.Errorf("commit Human build: repository is not on a branch")
+	}
+	session := a.ensureProposalSession(absolute, currentRevision, "")
+	human := session.branches["human"]
+	if human == nil {
+		return RevisionContext{}, fmt.Errorf("Human build is not initialized")
+	}
+	files := make(map[string]*engine.WorkingState)
+	for key, state := range session.humanStates {
+		parts := strings.Split(key, "\x00")
+		if len(parts) == 3 {
+			files[parts[2]] = state
+		}
+	}
+	for key, state := range human.states {
+		parts := strings.Split(key, "\x00")
+		if len(parts) >= 6 {
+			files[parts[5]] = state
+		}
+	}
+	if len(files) == 0 {
+		return RevisionContext{}, fmt.Errorf("no Human build edits are ready to commit")
+	}
+	paths := make([]string, 0, len(files))
+	for path, state := range files {
+		if state == nil {
+			continue
+		}
+		validation := state.Validate()
+		if !validation.Valid {
+			return RevisionContext{}, fmt.Errorf("cannot commit Human build: %s is invalid", path)
+		}
+		absolutePath := filepath.Join(absolute, filepath.FromSlash(path))
+		if err := os.WriteFile(absolutePath, []byte(state.Snapshot().RenderedCode), 0o644); err != nil {
+			return RevisionContext{}, fmt.Errorf("write Human file %s: %w", path, err)
+		}
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	if len(paths) == 0 {
+		return RevisionContext{}, fmt.Errorf("no Human build files are ready to commit")
+	}
+	if _, err := gitOutput(absolute, append([]string{"add", "--"}, paths...)...); err != nil {
+		return RevisionContext{}, fmt.Errorf("stage Human build: %w", err)
+	}
+	message = strings.TrimSpace(message)
+	if message == "" {
+		message = "contuts: commit Human build"
+	}
+	if _, err := gitOutput(absolute, "commit", "-m", message); err != nil {
+		return RevisionContext{}, fmt.Errorf("commit Human build: %w", err)
+	}
+	return a.revisionContext(absolute)
 }
 
 func gitOutput(directory string, args ...string) (string, error) {

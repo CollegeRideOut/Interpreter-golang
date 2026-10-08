@@ -5,8 +5,8 @@ proposals without giving up human control of the resulting program.
 
 ## Base Model
 
-The visible program is the `Compare to` revision. It is the base program that
-the person explores.
+In normal revision mode, the visible program is the `Compare to` revision. It
+is the next revision that the person explores.
 
 The `Current revision` is only the comparison baseline. Changing it changes the
 diff source; it must not replace the visible program explorer.
@@ -21,6 +21,17 @@ The existing AST edit machinery remains important. It supplies declaration
 ownership, parent/child relationships, reversible operations, and provenance.
 Proposal branches should be built around those operations rather than replacing
 them with opaque text patches.
+
+In proposal review mode, `Compare to` is not used. A shared base revision is
+compared independently to each selected proposal target, and the Human build
+starts as an exact copy of that base.
+
+```text
+base -> proposal-a
+base -> proposal-b
+base -> proposal-c
+base -> human build (selected operations)
+```
 
 ## Phases
 
@@ -40,6 +51,12 @@ program with its structural edits attached already feels useful.
 ### Phase 2: Create Proposal Branches
 
 Add first-class working branches forked from the base program.
+
+The first implementation slice uses the existing `Current revision -> Compare to`
+structural diff as its proposal source. In that slice, branches fork from the
+current revision because the existing edit operations are defined in that
+direction. The later proposal model can preserve `Compare to` as the immutable
+visible base once proposal operations have their own target-oriented input.
 
 ```text
 base

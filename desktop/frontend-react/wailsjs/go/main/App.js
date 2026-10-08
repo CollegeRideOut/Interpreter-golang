@@ -46,6 +46,14 @@ export function CloseInquiryTile(arg1, arg2) {
   return window['go']['main']['App']['CloseInquiryTile'](arg1, arg2);
 }
 
+export function CopyProposalEdit(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
+  return window['go']['main']['App']['CopyProposalEdit'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+}
+
+export function CreateProposalBranch(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['CreateProposalBranch'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function ExplorePreviousCommitEdits(arg1) {
   return window['go']['main']['App']['ExplorePreviousCommitEdits'](arg1);
 }
@@ -64,6 +72,18 @@ export function GetFileEditState(arg1, arg2, arg3, arg4, arg5, arg6) {
 
 export function GetFileEdits(arg1, arg2, arg3, arg4, arg5, arg6) {
   return window['go']['main']['App']['GetFileEdits'](arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
+export function GetHumanFileEditState(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['GetHumanFileEditState'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function GetProposalBranches(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetProposalBranches'](arg1, arg2, arg3);
+}
+
+export function GetProposalFileEditState(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['GetProposalFileEditState'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function GetReconciliationCandidates(arg1) {
@@ -146,6 +166,10 @@ export function ProjectEdits(arg1) {
   return window['go']['main']['App']['ProjectEdits'](arg1);
 }
 
+export function PromoteHumanBuild(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PromoteHumanBuild'](arg1, arg2, arg3);
+}
+
 export function Reconcile(arg1) {
   return window['go']['main']['App']['Reconcile'](arg1);
 }
@@ -184,6 +208,14 @@ export function RemoveFileEditSubtree(arg1, arg2, arg3, arg4, arg5, arg6, arg7) 
 
 export function ResizeOpenCode(arg1, arg2) {
   return window['go']['main']['App']['ResizeOpenCode'](arg1, arg2);
+}
+
+export function SelectProposalBranch(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SelectProposalBranch'](arg1, arg2, arg3, arg4);
+}
+
+export function SelectProposalBranches(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SelectProposalBranches'](arg1, arg2, arg3);
 }
 
 export function SelectRevision(arg1, arg2) {

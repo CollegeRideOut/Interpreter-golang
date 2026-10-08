@@ -5,6 +5,7 @@ import (
 	goast "go/ast"
 	"go/token"
 	"reflect"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -41,6 +42,7 @@ type structuralASTNode struct {
 type structuralEdit struct {
 	Index          int                `json:"index"`
 	Kind           string             `json:"kind"`
+	Hidden         bool               `json:"hidden,omitempty"`
 	NodeID         string             `json:"nodeId"`
 	NodeGlobalID   string             `json:"nodeGlobalId,omitempty"`
 	SourceGlobalID string             `json:"sourceGlobalId,omitempty"`
@@ -190,8 +192,48 @@ func simpleStructuralEditScripts(sourceTree, targetTree *structuralASTNode) []st
 	compareStructuralNodes(sourceTree, targetTree, nil, &edits)
 	for index := range edits {
 		edits[index].Index = index
+		edits[index].Hidden = isConcreteSyntaxEdit(edits[index])
 	}
 	return edits
+}
+
+func isConcreteSyntaxEdit(edit structuralEdit) bool {
+	if edit.Node == nil || (edit.Node.Language != "typescript" && edit.Node.Language != "tsx" && edit.Node.Language != "html") {
+		return false
+	}
+	if isSyntaxOwnedContainer(edit.Node.Language, edit.Node.Kind) {
+		return true
+	}
+	if len(edit.Node.Children) != 0 || edit.Node.Value == "" {
+		return false
+	}
+	kind := strings.TrimPrefix(edit.Node.Kind, edit.Node.Language+":")
+	if kind != edit.Node.Value {
+		return false
+	}
+	switch edit.Node.Value {
+	case "(", ")", "[", "]", "{", "}", "<", ">", "/", ",", ":", ";", "=", "=>", "?", ".", "...":
+		return true
+	default:
+		return false
+	}
+}
+
+func isSyntaxOwnedContainer(language, kind string) bool {
+	kind = strings.TrimPrefix(kind, language+":")
+	if language == "html" {
+		switch kind {
+		case "start_tag", "end_tag", "self_closing_tag", "tag_name":
+			return true
+		}
+	}
+	if language == "tsx" {
+		switch kind {
+		case "jsx_opening_element", "jsx_closing_element", "jsx_self_closing_element", "jsx_identifier":
+			return true
+		}
+	}
+	return false
 }
 
 func compareStructuralNodes(source, target *structuralASTNode, parent *structuralASTNode, edits *[]structuralEdit) {
@@ -259,8 +301,17 @@ func compareStructuralChildren(source, target *structuralASTNode, edits *[]struc
 		usedSource := make([]bool, len(sourceChildren))
 		for _, targetChild := range targetChildren {
 			match := -1
+			// Prefer preserving semantic identity when a container gains or
+			// reorders siblings. Matching by kind alone turns an insertion such
+			// as `Generated` into misleading updates to an existing identifier.
 			for sourceIndex, sourceChild := range sourceChildren {
-				if !usedSource[sourceIndex] && sourceChild.Kind == targetChild.Kind {
+				if !usedSource[sourceIndex] && sameStructuralValue(sourceChild, targetChild) {
+					match = sourceIndex
+					break
+				}
+			}
+			for sourceIndex, sourceChild := range sourceChildren {
+				if match < 0 && !usedSource[sourceIndex] && sourceChild.Kind == targetChild.Kind && !requiresValueMatch(targetChild) {
 					match = sourceIndex
 					break
 				}
@@ -278,6 +329,58 @@ func compareStructuralChildren(source, target *structuralASTNode, edits *[]struc
 			}
 		}
 	}
+}
+
+func sameStructuralValue(source, target *structuralASTNode) bool {
+	if source == nil || target == nil || source.Kind != target.Kind || source.Value != target.Value {
+		return false
+	}
+	if source.Value != "" {
+		return true
+	}
+	sourceValues := make([]string, 0)
+	targetValues := make([]string, 0)
+	for _, child := range source.Children {
+		if child.Value != "" {
+			sourceValues = append(sourceValues, child.Kind, child.Value)
+		}
+	}
+	for _, child := range target.Children {
+		if child.Value != "" {
+			targetValues = append(targetValues, child.Kind, child.Value)
+		}
+	}
+	if len(sourceValues) == 0 || len(sourceValues) != len(targetValues) {
+		return len(sourceValues) == len(targetValues)
+	}
+	for index := range sourceValues {
+		if sourceValues[index] != targetValues[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func hasStructuralValue(node *structuralASTNode) bool {
+	if node == nil {
+		return false
+	}
+	if node.Value != "" {
+		return true
+	}
+	for _, child := range node.Children {
+		if child.Value != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func requiresValueMatch(node *structuralASTNode) bool {
+	if node == nil {
+		return false
+	}
+	return node.Kind == "typescript:import_specifier" || node.Kind == "tsx:import_specifier"
 }
 
 func emitStructuralSubtree(kind string, node *structuralASTNode, parent *structuralASTNode, edits *[]structuralEdit) {

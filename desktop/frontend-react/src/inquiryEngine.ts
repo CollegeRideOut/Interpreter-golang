@@ -158,6 +158,7 @@ export type EditSummary = {
   startLine?: number;
   endLine?: number;
   status?: 'unapplied' | 'prepared' | 'applied' | 'removed';
+  proposalApplied?: boolean;
 };
 
 export type EditAncestor = {
@@ -179,6 +180,24 @@ export type FileEditState = {
   renderDiagnostics?: string[];
   diagnostics?: string[];
   valid: boolean;
+  branchId?: string;
+  workingAuthoritative?: boolean;
+};
+
+export type ProposalBranch = {
+  id: string;
+  name: string;
+  kind: string;
+  parentId?: string;
+  baseRevision: string;
+  sourceRevision?: string;
+  active: boolean;
+};
+
+export type ProposalWorkspace = {
+  activeBranchId: string;
+  selectedProposalIds?: string[];
+  branches: ProposalBranch[];
 };
 
 export type ComparisonFile = {
@@ -190,6 +209,7 @@ export type ComparisonFile = {
 export interface InquiryEngine {
   getCurrentState(): Promise<HeadlessState>;
   getRevisionContext(directory: string): Promise<RevisionContext>;
+  promoteHumanBuild(directory: string, currentRevision: string, message: string): Promise<RevisionContext>;
   openProgram(directory: string): Promise<HeadlessState>;
   chooseDirectory(): Promise<string>;
   startOpenCode(directory: string): Promise<void>;
@@ -199,6 +219,13 @@ export interface InquiryEngine {
   selectRevision(directory: string, revision: string): Promise<HeadlessState>;
   getFileEdits(directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string): Promise<EditSummary[]>;
   getFileEditState(directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string): Promise<FileEditState>;
+  getProposalBranches(directory: string, currentRevision: string, compareRevision: string): Promise<ProposalWorkspace>;
+  createProposalBranch(directory: string, currentRevision: string, compareRevision: string, proposalRevision: string, name: string): Promise<ProposalWorkspace>;
+  selectProposalBranch(directory: string, currentRevision: string, compareRevision: string, branchId: string): Promise<ProposalWorkspace>;
+  selectProposalBranches(directory: string, baseRevision: string, branchIds: string[]): Promise<ProposalWorkspace>;
+  getProposalFileEditState(directory: string, baseRevision: string, proposalId: string, packageDirectory: string, packageName: string, filePath: string): Promise<FileEditState>;
+  getHumanFileEditState(directory: string, baseRevision: string, packageDirectory: string, packageName: string, filePath: string): Promise<FileEditState>;
+  copyProposalEdit(directory: string, currentRevision: string, compareRevision: string, proposalId: string, packageDirectory: string, packageName: string, filePath: string, index: number): Promise<FileEditState>;
   getComparisonFiles(directory: string, currentRevision: string, compareRevision: string): Promise<ComparisonFile[]>;
   applyFileEdit(directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string, index: number): Promise<FileEditState>;
   applyFileEditSubtree(directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string, index: number): Promise<FileEditState>;
@@ -232,6 +259,13 @@ type WailsEngine = {
   SelectRevision: (directory: string, revision: string) => Promise<HeadlessState>;
   GetFileEdits: (directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string) => Promise<EditSummary[]>;
   GetFileEditState: (directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string) => Promise<FileEditState>;
+  GetProposalBranches: (directory: string, currentRevision: string, compareRevision: string) => Promise<ProposalWorkspace>;
+  CreateProposalBranch: (directory: string, currentRevision: string, compareRevision: string, proposalRevision: string, name: string) => Promise<ProposalWorkspace>;
+  SelectProposalBranch: (directory: string, currentRevision: string, compareRevision: string, branchId: string) => Promise<ProposalWorkspace>;
+  SelectProposalBranches: (directory: string, baseRevision: string, branchIds: string[]) => Promise<ProposalWorkspace>;
+  GetProposalFileEditState: (directory: string, baseRevision: string, proposalId: string, packageDirectory: string, packageName: string, filePath: string) => Promise<FileEditState>;
+  GetHumanFileEditState: (directory: string, baseRevision: string, packageDirectory: string, packageName: string, filePath: string) => Promise<FileEditState>;
+  CopyProposalEdit: (directory: string, currentRevision: string, compareRevision: string, proposalId: string, packageDirectory: string, packageName: string, filePath: string, index: number) => Promise<FileEditState>;
   GetComparisonFiles: (directory: string, currentRevision: string, compareRevision: string) => Promise<ComparisonFile[]>;
   ApplyFileEdit: (directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string, index: number) => Promise<FileEditState>;
   ApplyFileEditSubtree: (directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string, index: number) => Promise<FileEditState>;
@@ -239,6 +273,7 @@ type WailsEngine = {
   RemoveFileEditSubtree: (directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string, index: number) => Promise<FileEditState>;
   GetCurrentState: () => Promise<HeadlessState>;
   GetRevisionContext: (directory: string) => Promise<RevisionContext>;
+  PromoteHumanBuild: (directory: string, currentRevision: string, message: string) => Promise<RevisionContext>;
   StartInquiry: (title: string) => Promise<HeadlessState>;
   OpenComparisonFile: (directory: string, currentRevision: string, compareRevision: string, packageDirectory: string, packageName: string, filePath: string) => Promise<HeadlessState>;
   OpenInquiryPackage: (rowID: string, tileID: string, packageDirectory: string, packageName: string) => Promise<HeadlessState>;
@@ -278,6 +313,7 @@ export function createWailsEngine(): InquiryEngine {
   return {
     getCurrentState: () => Promise.resolve().then(() => app().GetCurrentState()),
     getRevisionContext: (directory) => app().GetRevisionContext(directory),
+    promoteHumanBuild: (directory, currentRevision, message) => app().PromoteHumanBuild(directory, currentRevision, message),
     openProgram: async (directory) => {
       await app().OpenProgram(directory);
       return app().GetCurrentState();
@@ -290,6 +326,13 @@ export function createWailsEngine(): InquiryEngine {
     selectRevision: (directory, revision) => app().SelectRevision(directory, revision),
     getFileEdits: (directory, currentRevision, compareRevision, packageDirectory, packageName, filePath) => app().GetFileEdits(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath),
     getFileEditState: (directory, currentRevision, compareRevision, packageDirectory, packageName, filePath) => app().GetFileEditState(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath),
+    getProposalBranches: (directory, currentRevision, compareRevision) => app().GetProposalBranches(directory, currentRevision, compareRevision),
+    createProposalBranch: (directory, currentRevision, compareRevision, proposalRevision, name) => app().CreateProposalBranch(directory, currentRevision, compareRevision, proposalRevision, name),
+    selectProposalBranch: (directory, currentRevision, compareRevision, branchId) => app().SelectProposalBranch(directory, currentRevision, compareRevision, branchId),
+    selectProposalBranches: (directory, baseRevision, branchIds) => app().SelectProposalBranches(directory, baseRevision, branchIds),
+    getProposalFileEditState: (directory, baseRevision, proposalId, packageDirectory, packageName, filePath) => app().GetProposalFileEditState(directory, baseRevision, proposalId, packageDirectory, packageName, filePath),
+    getHumanFileEditState: (directory, baseRevision, packageDirectory, packageName, filePath) => app().GetHumanFileEditState(directory, baseRevision, packageDirectory, packageName, filePath),
+    copyProposalEdit: (directory, currentRevision, compareRevision, proposalId, packageDirectory, packageName, filePath, index) => app().CopyProposalEdit(directory, currentRevision, compareRevision, proposalId, packageDirectory, packageName, filePath, index),
     getComparisonFiles: (directory, currentRevision, compareRevision) => app().GetComparisonFiles(directory, currentRevision, compareRevision),
     applyFileEdit: (directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, index) => app().ApplyFileEdit(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, index),
     applyFileEditSubtree: (directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, index) => app().ApplyFileEditSubtree(directory, currentRevision, compareRevision, packageDirectory, packageName, filePath, index),

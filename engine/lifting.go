@@ -1,5 +1,7 @@
 package engine
 
+import "strings"
+
 // LiftOptions controls which structural edits are hidden from a projected view.
 // The canonical edit list is never changed by projection.
 type LiftOptions struct {
@@ -45,7 +47,7 @@ func ProjectEdits(edits []Edit, options LiftOptions) []EditView {
 	appendView = func(index, depth int) {
 		edit := edits[index]
 		childIndexes := children[editIdentity(edit)]
-		if options.HiddenKinds[edit.NodeKind] {
+		if edit.Hidden || options.HiddenKinds[edit.NodeKind] {
 			for _, child := range childIndexes {
 				appendView(child, depth)
 			}
@@ -123,6 +125,39 @@ func (state *WorkingState) ApplyProjected(index int, options ApplyOptions, lifti
 			return err
 		}
 	}
+	if state.edits[index].Kind == "INSERT" && isSyntaxManagedLanguage(state.edits[index].NodeKind) {
+		if err := state.applyStructuralDescendants(index, options); err != nil {
+			return err
+		}
+	}
+	for _, editIndex := range state.implicitSyntaxEdits(index) {
+		if state.status[editIndex] == EditApplied {
+			continue
+		}
+		if err := state.ApplyWithOptions(editIndex, options); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func isSyntaxManagedLanguage(kind string) bool {
+	return strings.HasPrefix(kind, "typescript:") || strings.HasPrefix(kind, "tsx:") || strings.HasPrefix(kind, "html:")
+}
+
+func (state *WorkingState) applyStructuralDescendants(index int, options ApplyOptions) error {
+	parentID := editIdentity(state.edits[index])
+	for childIndex, edit := range state.edits {
+		if editParentIdentity(edit) != parentID || state.status[childIndex] == EditApplied {
+			continue
+		}
+		if err := state.ApplyWithOptions(childIndex, options); err != nil {
+			return err
+		}
+		if err := state.applyStructuralDescendants(childIndex, options); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -169,6 +204,14 @@ func (state *WorkingState) RemoveProjected(index int, lifting LiftOptions) error
 	if err := state.Remove(index); err != nil {
 		return err
 	}
+	for _, editIndex := range state.implicitSyntaxEdits(index) {
+		if state.status[editIndex] != EditApplied && state.status[editIndex] != EditPrepared {
+			continue
+		}
+		if err := state.Remove(editIndex); err != nil {
+			return err
+		}
+	}
 	for _, editIndex := range state.replacementEdits(index) {
 		if editIndex == index || (state.status[editIndex] != EditApplied && state.status[editIndex] != EditPrepared) {
 			continue
@@ -195,6 +238,28 @@ func (state *WorkingState) RemoveProjected(index int, lifting LiftOptions) error
 		parentID = editParentIdentity(state.edits[parentIndex])
 	}
 	return nil
+}
+
+// implicitSyntaxEdits returns concrete syntax edits in the same structural
+// container as a semantic edit. They are implementation details of the
+// container, such as the comma beside a newly inserted parameter.
+func (state *WorkingState) implicitSyntaxEdits(index int) []int {
+	if index < 0 || index >= len(state.edits) {
+		return nil
+	}
+	selected := state.edits[index]
+	parent := editParentIdentity(selected)
+	if parent == "" {
+		return nil
+	}
+	result := make([]int, 0)
+	for candidateIndex, candidate := range state.edits {
+		if candidateIndex == index || !candidate.Hidden || editParentIdentity(candidate) != parent {
+			continue
+		}
+		result = append(result, candidateIndex)
+	}
+	return result
 }
 
 // RemoveProjectedSubtree removes a projected edit and all dependent children.

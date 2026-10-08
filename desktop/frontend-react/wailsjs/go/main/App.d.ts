@@ -26,6 +26,10 @@ export function CloseInquiryColumn(arg1:string,arg2:string):Promise<workspace.St
 
 export function CloseInquiryTile(arg1:string,arg2:string):Promise<workspace.State>;
 
+export function CopyProposalEdit(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:string,arg8:number):Promise<main.FileEditState>;
+
+export function CreateProposalBranch(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<main.ProposalWorkspace>;
+
 export function ExplorePreviousCommitEdits(arg1:string):Promise<main.ProgramSnapshot>;
 
 export function GetComparisonFiles(arg1:string,arg2:string,arg3:string):Promise<Array<main.ComparisonFile>>;
@@ -35,6 +39,12 @@ export function GetCurrentState():Promise<workspace.State>;
 export function GetFileEditState(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string):Promise<main.FileEditState>;
 
 export function GetFileEdits(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string):Promise<Array<main.EditSummary>>;
+
+export function GetHumanFileEditState(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<main.FileEditState>;
+
+export function GetProposalBranches(arg1:string,arg2:string,arg3:string):Promise<main.ProposalWorkspace>;
+
+export function GetProposalFileEditState(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string):Promise<main.FileEditState>;
 
 export function GetReconciliationCandidates(arg1:string):Promise<Array<engine.ReconciliationCandidate>>;
 
@@ -76,6 +86,8 @@ export function OpenProgram(arg1:string):Promise<main.ProgramSnapshot>;
 
 export function ProjectEdits(arg1:Array<string>):Promise<Array<engine.EditView>>;
 
+export function PromoteHumanBuild(arg1:string,arg2:string,arg3:string):Promise<main.RevisionContext>;
+
 export function Reconcile(arg1:engine.ReconciliationCandidate):Promise<main.ProgramSnapshot>;
 
 export function ReconcileGroup(arg1:string):Promise<main.ProgramSnapshot>;
@@ -95,6 +107,10 @@ export function RemoveFileEdit(arg1:string,arg2:string,arg3:string,arg4:string,a
 export function RemoveFileEditSubtree(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:number):Promise<main.FileEditState>;
 
 export function ResizeOpenCode(arg1:number,arg2:number):Promise<void>;
+
+export function SelectProposalBranch(arg1:string,arg2:string,arg3:string,arg4:string):Promise<main.ProposalWorkspace>;
+
+export function SelectProposalBranches(arg1:string,arg2:string,arg3:Array<string>):Promise<main.ProposalWorkspace>;
 
 export function SelectRevision(arg1:string,arg2:string):Promise<workspace.State>;
 

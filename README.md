@@ -1,352 +1,280 @@
-# contuts
+# Contuts
 
-`contuts` is a code-understanding and structural program-transformation tool.
-It is being built for a human who wants to understand a change all the way
-from the repository state to the smallest affected declaration.
+Contuts is an experiment in keeping a human mentally involved while AI changes
+the codebase.
 
-The product is the thing that matters. The architecture matters because it is
-what makes the product trustworthy, understandable, and capable of growing
-without losing its mental model.
+AI can make a large implementation quickly. The risk is not only that the code
+is wrong. The risk is that the code is correct and the human no longer knows
+where behavior lives, how the system evolved, or what a change actually did.
 
-AI can make this workflow noisy, repetitive, and frustrating. That is not a
-reason to give up on thinking carefully about the system. A product builder
-should be able to obsess over the architecture, define the model precisely,
-and still use AI as leverage. The human owns the model and the target state.
-
-## Desired Workflow
-
-The primary workflow is revision comparison followed by declaration-level
-inquiry.
+Contuts explores a simple loop:
 
 ```text
-open a program
-    -> choose the current revision
-    -> choose the revision to compare against
-    -> generate edits
-    -> inspect the complete canonical edit tree
-    -> split edits into declaration inquiries and related columns
-    -> apply, remove, or inspect individual structural edits
-    -> continue exploring the resulting program state
+inspect a change
+    -> apply a meaningful structural group
+    -> run a known scenario
+    -> observe what happened
+    -> inspect or investigate
+    -> continue from the new state
 ```
 
-### 1. Open A Program
+The goal is not to make humans approve every line. The goal is to let AI do the
+typing while giving the human a way to stay oriented.
 
-The initial inquiry opens the program, packages, files, declarations, imports,
-and source representation. It is the starting context, not the final answer.
+## Two Tools
 
-The explorer is a sequence of equivalent columns:
+Contuts has two related responsibilities.
+
+### AST Evolution
+
+The engine compares two repository states and produces structural AST edits.
+The AST is used to make controlled, valid changes and to show what changed
+before and after an edit.
+
+The AST is not intended to be the primary human abstraction. Syntax shells such
+as punctuation, delimiters, import containers, and block wrappers are applied
+automatically. Human-facing review should focus on top-level semantic edit
+groups.
+
+For example, a human should normally see:
 
 ```text
-program
-    -> package
-        -> file
-            -> declaration
-                -> import, reference, caller, callee, dependent, or affected code
+Add books persistence model
+Register the migration
+Load books from the repository
+Expose books from the API
 ```
 
-Opening a target in the current column answers the current question. Opening it
-in a new column preserves the question that led there. Opening it to the left
-connects the result to an earlier context.
+not a list of every comma, identifier, and syntax node required to render those
+changes.
 
-### 2. Choose Two Revisions
+Each group can be expanded when structural detail is useful. Applying a group
+applies the complete AST subtree, including the syntax edits that support it.
 
-The comparison controls remain explicit because generating edits between two
-program states is the central operation.
+### Execution History
 
-The current revision may be the working tree or a commit. The comparison
-revision may be a branch or commit. Selecting revisions does not silently
-rewrite the checked-out working tree.
+The debugger side records what happened when a source state ran.
 
-The user then presses **Generate edits**. Edit data is loaded for every known
-file in the inquiry. There is no hidden "show complete file" filter: the
-comparison always presents the complete canonical edit set.
+An execution record can contain:
 
-### 3. Read The Complete Edit Tree
+- The source checkpoint.
+- The command, input, environment, and fixtures.
+- Breakpoints and debugger locations.
+- Stack frames and observed values.
+- Output, errors, and the final result.
+- Paths reached during the run.
+- The first observable difference from another run.
 
-The comparison view shows the structural tree, not only a lifted or simplified
-summary:
+Normal debuggers remain responsible for stepping through a live process. Contuts
+organizes repeatable scenarios and keeps the history connected to source
+checkpoints. Going back initially means restoring a source checkpoint and
+replaying the scenario. For the interpreter, complete runtime snapshots may
+eventually allow direct state restoration.
+
+## Neovim First
+
+Neovim is the primary editing and debugging surface. Contuts does not try to
+replace it with another code editor or debugger.
+
+The first Neovim integration displays the files changed between two revisions
+and their structural edits. It is intentionally read-only for now; application
+and checkpoint commands will use the same engine next.
+
+Build the command-line tool:
+
+```sh
+go build -o "$HOME/bin/contuts" .
+```
+
+Add the plugin to your Neovim configuration:
+
+```lua
+local contuts = require("contuts")
+
+contuts.setup({
+  command = vim.fn.expand("~/bin/contuts"),
+  directory = vim.fn.getcwd(),
+  base = "HEAD~1",
+  compare = "working-tree",
+})
+```
+
+Open the edit overview:
+
+```vim
+:Contuts
+```
+
+The overview lists changed files and their AST edits. Press `<CR>` on an edit
+to open its file and source location. Press `r` to refresh and `q` to close.
+
+The command-line JSON interface can also be used directly:
+
+```sh
+contuts --nvim-json /path/to/repository HEAD~1 working-tree
+```
+
+The JSON response is deliberately small and stable enough for editor clients:
+
+```json
+{
+  "schema": "contuts.nvim.v1",
+  "directory": "/path/to/repository",
+  "base": "HEAD~1",
+  "compare": "working-tree",
+  "files": [
+    {
+      "path": "server/src/db.ts",
+      "edits": []
+    }
+  ]
+}
+```
+
+## Human Build And Git
+
+Proposal targets remain immutable. The Human build is the mutable state where
+selected structural groups from one or more proposals are combined.
+
+The workflow is:
 
 ```text
-file
-    -> declaration/specification
-        -> changed AST node
-            -> changed child
-                -> changed descendant
+choose a current baseline
+    -> choose one or more proposal sources
+    -> inspect semantic edit groups
+    -> apply selected groups to Human build
+    -> run or debug the Human build
+    -> commit Human build on the current Git branch
 ```
 
-Every canonical edit keeps its identity, parent identity, ancestor path, source
-location, operation kind, and application status. A structural replacement may
-require related child operations; those relationships remain visible.
-
-The complete tree is important because a file can contain several independent
-functions, methods, types, literals, fields, or expressions. Showing only one
-lifted operation loses the causal structure needed to understand and control
-the change.
-
-## Inquiry And Column Rules
-
-The unit of organization is not merely the file. Files are containers; the
-meaningful inquiry boundary is the declaration and its structural ancestry.
-
-### Separate Inquiries
-
-Create separate inquiries when edits are independent siblings:
-
-- Two top-level functions changed independently.
-- Two methods changed independently.
-- Two top-level types changed independently.
-- Two unrelated declarations in the same file changed independently.
-- Changes in unrelated files have no edited declaration ancestor connecting them.
-
-Each inquiry should be named after the narrowest meaningful declaration when
-possible, such as `function Remaining` or `struct Server`, and should retain
-the source file as context.
-
-The desired shape is:
+The tool does not move `main`. If the repository is on `feature/login`, the
+Human build commit is made on `feature/login`. The interface should always make
+these contexts explicit:
 
 ```text
-inquiry: function First
-    controllers/example.go
-
-inquiry: function Second
-    controllers/example.go
+branch: feature/login
+base: <baseline revision>
+compare to: <selected branch or commit>
+proposal: <proposal source>
 ```
 
-These are not two file-level copies of the same change. They are two declaration
-stories in the same file.
+## Architecture View
 
-### Same Inquiry, Separate Columns
-
-Keep edits in one inquiry when they share an edited ancestor, but use columns
-for independent cousin branches below that ancestor.
+The most useful overview is not a giant edit tree. It is a map of the system:
 
 ```text
-inquiry: function Build
-
-column 1: edited Build parent -> branch A
-column 2: edited Build parent -> branch B
+project
+  -> package or folder
+      -> file
+          -> declaration
+              -> imports, callers, callees, references
 ```
 
-This applies recursively. If two edits are siblings and their parent is also
-edited, the parent establishes the shared inquiry and the sibling branches are
-separate columns. If the shared edited ancestor is a grandparent, cousin edits
-under that grandparent remain one inquiry with separate columns.
+The architecture view should answer:
 
-The rule is based on AST identity and ancestry, not just line ranges or file
-names:
+- Where does this behavior live?
+- What files and packages are involved?
+- What depends on this declaration?
+- Which files changed together?
+- Which execution entry point can exercise the change?
+
+This is the part that is difficult to get from a normal Neovim session. The
+Neovim plugin can remain focused on editing and debugging while Contuts provides
+the repository-level map.
+
+## Debugger Integration
+
+Contuts should use existing debugger technology rather than become a universal
+debugger.
+
+- Go: Delve through DAP.
+- JavaScript and TypeScript: Node inspector or `vscode-js-debug`.
+- Other languages: their existing DAP adapter where practical.
+- Interpreter execution: Contuts instrumentation, because the runtime is under
+  our control.
+
+Neovim and `nvim-dap` are well suited for breakpoints, stepping, stack frames,
+locals, watches, and test debugging. Contuts adds the missing history around
+those sessions: which source checkpoint ran, with which input, and how its
+observed execution compared with another checkpoint.
+
+## Interpreter Experiment
+
+The interpreter is the first execution target because its complete path is
+observable:
 
 ```text
-same edited declaration or ancestor -> same inquiry
-independent sibling declaration    -> separate inquiry
-same edited ancestor, cousin branch -> separate columns
-no declaration ancestor             -> file-level fallback inquiry
+source
+  -> tokens
+  -> AST
+  -> environment
+  -> evaluation
+  -> function calls
+  -> values
+  -> result
 ```
 
-### Declaration Boundaries
-
-Grouping must descend at least to declaration-level nodes. The relevant
-boundaries include:
-
-- Functions.
-- Methods.
-- Type declarations.
-- Struct and interface declarations.
-- Constants and variables.
-- Import declarations when no more meaningful declaration owns the edit.
-- Nested declarations and their AST descendants.
-
-An edit inside a function body belongs to that function inquiry. An edit inside
-a method belongs to that method inquiry, even when the method is attached to a
-type. An edit inside a type specification belongs to the type inquiry. Only
-edits that cannot be associated with a declaration use the file as their
-fallback context.
-
-## Applying Edits
-
-Every edit is individually inspectable and controllable:
+A useful first experiment is:
 
 ```text
-unapplied
-    -> apply
-        -> prepared/applied
-    -> remove
-        -> unapplied/removed
+run historical input against state A
+    -> save trace A
+apply one semantic edit group
+    -> run the same input against state B
+    -> save trace B
+compare the traces and locate the first divergence
 ```
 
-Applying a child may require materializing an edited ancestor. That does not
-erase the canonical child edit. Removing an edit must remove only the requested
-operation and any temporary projected structure that exists solely to support
-it.
+If a path is not reached, the tool should say so. It should distinguish:
 
-The engine distinguishes:
+- Not reached: the scenario did not execute the path.
+- Blocked: the path needs different input, fixtures, or environment setup.
+- Observed: the path executed and produced evidence.
 
-- Canonical edits: the complete source-to-target edit set.
-- Lifted edits: a useful projection for compact views.
-- Projected application: the concrete operations required to materialize one
-  selected canonical edit.
-- Rendered working code: the current intermediate program representation.
+Creating the setup required to reach a path should remain separate from the code
+change being investigated.
 
-The UI may offer a convenient replacement action for a delete, but the
-underlying operation remains structural and traceable.
+## Current Direction
 
-## Explorer Workflow
+The immediate direction is deliberately narrow:
 
-The comparison workflow and dependency workflow are connected but distinct.
-The explorer answers questions about code relationships:
+1. Keep the AST engine as the trusted structural application layer.
+2. Show top-level semantic edit groups by default.
+3. Use Neovim for source editing and debugger interaction.
+4. Use Contuts for architecture, source checkpoints, scenarios, and history.
+5. Build one replayable before/after execution experiment for the interpreter.
 
-```text
-start here
-    -> why does this depend on that?
-    -> where is this declaration used?
-    -> what calls this function?
-    -> what changed inside this declaration?
-    -> what related declaration should I inspect next?
-```
+The project is an experiment, not a claim that every engineer needs this
+workflow. The result should be judged by one question:
 
-Every column should expose the same basic lenses:
+> After an AI-driven change, do I understand the codebase and its behavior
+> better because I could observe the transition?
 
-- Packages and files.
-- All declarations.
-- Exported API.
-- Source code.
-- Imports and references.
-- Callers and callees when available.
-- Dependents and affected code when available.
-- Structural edits and exact edit context.
-
-Repeated targets are marked as previously opened instead of silently creating a
-confusing cycle. Unrelated questions start a separate inquiry rather than
-polluting the current path.
-
-## Structural AST Model
-
-The engine parses source through a language adapter into a structural tree and
-tracks identity across source and target revisions. Numeric indexes and raw AST
-pointers are not durable identities. Edits therefore retain:
-
-- Node identity and global identity.
-- Source and target identity where both exist.
-- Parent and ancestor identity.
-- AST field and position.
-- Source line range.
-- Operation kind and status.
-- Render diagnostics.
-- Working-state revision.
-
-The Go adapter preserves useful syntax for common Go nodes, including type
-specifications, composite literals, key/value elements, arrays, maps, structs,
-interfaces, functions, and their nested expressions. The Tree-sitter adapters
-currently support syntax-focused TypeScript and HTML trees while reusing the
-same identity, diff, lifting, application, and removal machinery. Incomplete
-intermediate states are allowed, but they should be rendered with explicit
-diagnostics rather than silently discarded.
-
-Parsing, rendering, compilation, type checking, and tests are observations of a
-program state. They should inform the next inquiry, not erase the state.
-
-## Human Direction And AI Leverage
-
-The human chooses the target state, the revisions, the inquiry boundaries, and
-which edits are accepted. AI may locate code, propose an edit, explain a
-relationship, or iterate toward a structural contract. AI must not silently
-decide what becomes part of the working program.
-
-```text
-human defines the goal
-    -> AI proposes a bounded operation
-    -> contuts exposes the exact AST edits
-    -> human inspects declaration and ancestry grouping
-    -> human applies, removes, or changes an edit
-    -> contuts renders and verifies the resulting state
-```
-
-The product is not primarily an AI summary viewer. A summary is a claim. The
-valuable artifact is the visible path from one program state to another:
-
-- The source location.
-- The declaration that owns the change.
-- The relationship that caused it to be shown.
-- The complete structural edit tree.
-- The resulting working source.
-- Diagnostics and verification results.
-- Provenance back to the original operation.
-
-The architecture should make that mental model possible. It should be possible
-to ask not only whether a change is good, but exactly which declaration changed,
-which parent made the change necessary, which cousin branch is independent, and
-what state will exist after applying it.
-
-## Current Prototype
-
-The repository currently contains experiments for:
-
-- Go AST parsing, export, and field-aware structural diffs.
-- Canonical insert, update, delete, and replacement operations.
-- Parent/ancestor identity and reconciliation.
-- A mutable intermediate working tree.
-- Reversible edit application and removal.
-- Best-effort rendering of incomplete states.
-- Declaration, package, file, import, and reference exploration.
-- Declaration-level comparison inquiries and cousin columns in the React UI.
-- A Wails desktop application.
-- A multi-package calorie-app fixture for dependency exploration.
-- A language-adapter seam with syntax-focused TypeScript and HTML support.
-
-The prototype is not yet a complete multi-file transformation environment.
-Reference, call, type, and impact analysis are still developing. TypeScript and
-HTML are available through the engine and file comparison path, but workspace
-discovery and declaration exploration remain Go-specific. The important
-near-term goal is to make the inquiry and edit model correct and understandable
-before adding more automation.
-
-## Running It
+## Development
 
 Run the root tests:
 
-```bash
+```sh
 go test ./...
+go test -race ./...
 ```
 
-Build or test the desktop application:
+Run the desktop tests:
 
-```bash
+```sh
 cd desktop
-go test ./...
+go test .
+go test -race .
 ```
 
-The frontend tests and production build are run from
-`desktop/frontend-react/`:
+Run the React frontend tests and build:
 
-```bash
-npm test -- --run
+```sh
+cd desktop/frontend-react
+npm test
 npm run build
 ```
 
-The packaged desktop binary is written to:
-
-```text
-```
-
-The default example uses `TestProgram/`. `TestProgramCalorieApp/` is a
-multi-package fixture for package, import, declaration, and revision workflows.
-
-## Product Test
-
-The product is moving in the right direction when a user can say:
-
-```text
-Start here.
-Compare these two revisions.
-Generate the complete edits.
-Show me the functions and types affected.
-Separate independent sibling declarations.
-Put cousin branches under the same edited parent into columns.
-Keep this edit, remove that one, and continue from the resulting state.
-```
-
-If the user can see the code, the declaration boundaries, the ancestry, the
-chosen edits, and the resulting working states, `contuts` is doing useful work.
-
-The older project notes are preserved in [`oldREADME.md`](oldREADME.md),
-[`oldDIRECTION.md`](oldDIRECTION.md), and
-[`INTERFACE_IDEAS.md`](INTERFACE_IDEAS.md).
+The repository contains experimental desktop, terminal, AST, and debugger
+prototypes. They are implementation material for testing the mental-model
+hypothesis, not separate product commitments.

@@ -113,6 +113,29 @@ type WorkingSnapshot struct {
 	Status            []EditStatus `json:"status"`
 }
 
+// Fork returns an independent working session with the same tree, edits, and
+// statuses. Subsequent operations on the fork do not affect the source state.
+func (state *WorkingState) Fork() *WorkingState {
+	if state == nil {
+		return nil
+	}
+	edits := append([]structuralEdit(nil), state.edits...)
+	for index := range edits {
+		edits[index].AncestorIDs = append([]string(nil), edits[index].AncestorIDs...)
+		edits[index].Ancestors = append([]EditAncestor(nil), edits[index].Ancestors...)
+	}
+	fork := &WorkingState{
+		source:  state.source.clone(),
+		target:  state.target.clone(),
+		working: state.working.clone(),
+		edits:   edits,
+		status:  append([]EditStatus(nil), state.status...),
+		options: append([]ApplyOptions(nil), state.options...),
+	}
+	bindStructuralEditIdentities(fork.source, fork.target, fork.edits)
+	return fork
+}
+
 // ValidationReport contains structural validity diagnostics for the current
 // working tree.
 type ValidationReport struct {

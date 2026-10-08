@@ -42,6 +42,29 @@ func TestPublicEngineAPI(t *testing.T) {
 	}
 }
 
+func TestWorkingStateForkIsIndependent(t *testing.T) {
+	state, err := engine.NewWorkingStateFromSource(
+		[]byte("package main\n\nfunc main() {}\n"),
+		[]byte("package main\n\nfunc main() {\n\tx := 10\n}\n"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fork := state.Fork()
+	if fork == nil {
+		t.Fatal("fork is nil")
+	}
+	if err := fork.ApplyProjected(0, engine.ApplyOptions{Reconcile: true}, engine.LiftOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if fork.Snapshot().RenderedCode == state.Snapshot().RenderedCode {
+		t.Fatal("fork application changed no fork-local state")
+	}
+	if state.Snapshot().Status[0] == engine.EditApplied {
+		t.Fatal("fork application changed the source state status")
+	}
+}
+
 func TestApplyProjectedKeepsReplacementSlotsValid(t *testing.T) {
 	state, err := engine.NewWorkingStateFromSource(
 		[]byte("package main\n\nfunc main() {\n\tx := 5\n\t_ = x\n}\n"),

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"interpreter/engine"
 )
 
 func TestOpenMainFileFromRootPackage(t *testing.T) {
@@ -85,6 +87,62 @@ func TestGetRevisionContextSupportsAnUnbornRepository(t *testing.T) {
 	}
 }
 
+func TestPromoteHumanBuildCommitsCurrentBranchWithoutAdvancingMain(t *testing.T) {
+	root := t.TempDir()
+	if output, err := exec.Command("git", "-C", root, "init", "-b", "feature").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, output)
+	}
+	for _, config := range [][]string{{"user.email", "test@example.com"}, {"user.name", "Test User"}} {
+		if output, err := exec.Command("git", "-C", root, "config", config[0], config[1]).CombinedOutput(); err != nil {
+			t.Fatalf("git config: %v\n%s", err, output)
+		}
+	}
+	path := filepath.Join(root, "main.go")
+	source := []byte("package main\n\nfunc main() {}\n")
+	target := []byte("package main\n\nfunc main() { println(\"human\") }\n")
+	if err := os.WriteFile(path, source, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command("git", "-C", root, "add", "main.go").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, output)
+	}
+	if output, err := exec.Command("git", "-C", root, "commit", "-m", "base").CombinedOutput(); err != nil {
+		t.Fatalf("git commit base: %v\n%s", err, output)
+	}
+
+	state, err := engine.NewWorkingStateFromSource(source, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range state.Snapshot().Edits {
+		if err := state.Apply(index); err != nil {
+			t.Fatalf("apply Human edit %d: %v", index, err)
+		}
+	}
+	app := NewApp()
+	absolute, err := filepath.Abs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := app.ensureProposalSession(absolute, "working-tree", "")
+	session.humanStates = make(map[string]*engine.WorkingState)
+	session.humanStates["\x00main\x00main.go"] = state
+	if _, err := app.PromoteHumanBuild(root, "working-tree", ""); err != nil {
+		t.Fatal(err)
+	}
+	branch, err := gitOutput(absolute, "symbolic-ref", "--short", "-q", "HEAD")
+	if err != nil || strings.TrimSpace(branch) != "feature" {
+		t.Fatalf("current branch = %q, err = %v", branch, err)
+	}
+	if _, err := gitOutput(absolute, "rev-parse", "--verify", "refs/heads/main"); err == nil {
+		t.Fatal("Human build unexpectedly created or advanced main")
+	}
+	message, err := gitOutput(absolute, "log", "-1", "--format=%s")
+	if err != nil || strings.TrimSpace(message) != "contuts: commit Human build" {
+		t.Fatalf("commit message = %q, err = %v", message, err)
+	}
+}
+
 func TestSelectRevisionLoadsTheProgramCommitWithoutCheckout(t *testing.T) {
 	app := NewApp()
 	context, err := app.GetRevisionContext("../TestProgramCalorieApp")
@@ -149,6 +207,86 @@ func TestComparisonFileEditsCanBeAppliedAndRemoved(t *testing.T) {
 	}
 	if removed.Edits[0].Status != "removed" {
 		t.Fatalf("removed status = %q", removed.Edits[0].Status)
+	}
+}
+
+func TestProposalBranchesKeepIndependentFileStates(t *testing.T) {
+	app := NewApp()
+	args := []string{"../TestProgram", "working-tree", "aaf2399", "", "main", "main.go"}
+	base, err := app.GetFileEditState(args[0], args[1], args[2], args[3], args[4], args[5])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(base.Edits) < 2 {
+		t.Fatalf("expected at least two edits, got %d", len(base.Edits))
+	}
+	proposalA, err := app.CreateProposalBranch(args[0], args[1], args[2], args[2], "Conservative")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proposalA.ActiveBranchID != "proposal-1" {
+		t.Fatalf("active branch = %q", proposalA.ActiveBranchID)
+	}
+	if _, err := app.ApplyFileEdit(args[0], args[1], args[2], args[3], args[4], args[5], base.Edits[0].Index); err != nil {
+		t.Fatal(err)
+	}
+	proposalB, err := app.CreateProposalBranch(args[0], args[1], args[2], args[2], "Alternative")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.ApplyFileEdit(args[0], args[1], args[2], args[3], args[4], args[5], base.Edits[1].Index); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.SelectProposalBranch(args[0], args[1], args[2], "proposal-1"); err != nil {
+		t.Fatal(err)
+	}
+	selectedA, err := app.GetFileEditState(args[0], args[1], args[2], args[3], args[4], args[5])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selectedA.Edits[0].Status != "applied" || selectedA.Edits[1].Status == "applied" {
+		t.Fatalf("proposal A leaked proposal B state: %+v", selectedA.Edits[:2])
+	}
+	if _, err := app.SelectProposalBranch(args[0], args[1], args[2], "base"); err != nil {
+		t.Fatal(err)
+	}
+	selectedBase, err := app.GetFileEditState(args[0], args[1], args[2], args[3], args[4], args[5])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selectedBase.Edits[0].Status == "applied" || selectedBase.Edits[1].Status == "applied" {
+		t.Fatalf("proposal edits leaked into base: %+v", selectedBase.Edits[:2])
+	}
+	if proposalB.ActiveBranchID != "proposal-2" {
+		t.Fatalf("second branch = %q", proposalB.ActiveBranchID)
+	}
+}
+
+func TestProposalEditCanBeCopiedToHumanBuild(t *testing.T) {
+	app := NewApp()
+	directory, current, compare := "../TestProgram", "working-tree", "aaf2399"
+	if _, err := app.CreateProposalBranch(directory, current, compare, compare, "Candidate"); err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := app.GetFileEditState(directory, current, compare, "", "main", "main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(proposal.Edits) == 0 {
+		t.Fatal("expected proposal edits")
+	}
+	if _, err := app.CopyProposalEdit(directory, current, compare, "proposal-1", "", "main", "main.go", proposal.Edits[0].Index); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.SelectProposalBranch(directory, current, compare, "human"); err != nil {
+		t.Fatal(err)
+	}
+	human, err := app.GetFileEditState(directory, current, compare, "", "main", "main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if human.WorkingCode == "" || !human.Valid {
+		t.Fatalf("human build state = %+v", human)
 	}
 }
 

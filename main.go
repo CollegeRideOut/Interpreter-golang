@@ -17,6 +17,13 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "watch" {
+		if err := runWatch(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--nvim-json" {
 		if err := runNvimJSON(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)

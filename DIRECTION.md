@@ -10,6 +10,70 @@ to another.
 The product is not a fixed tree, a two-pane dependency viewer, or an opaque AI
 patch generator. It is a sequence of visible questions over a working codebase.
 
+## Debugger-Native End-To-End Testing
+
+The practical product center is a debugger-native end-to-end testing loop. The
+user should be able to explore a real scenario from Neovim, stop inside the
+changed code, inspect the state, and preserve a successful path as evidence and
+eventually as a repeatable test.
+
+```text
+change code
+    -> compare the change
+    -> start the frontend and backend
+    -> perform a real scenario
+    -> stop at changed code
+    -> inspect state and continue
+    -> save the execution witness
+    -> generate or replay a test
+```
+
+Contuts is not replacing `nvim-dap`. DAP remains the debugger. Contuts connects
+the source change, the runtime stop, and the resulting test evidence.
+
+The core evidence chain is:
+
+```text
+AST fact       -> this code changed
+runtime fact   -> execution reached this changed location
+state fact     -> these inputs, locals, and outputs were observed
+test witness   -> this scenario produced this result for this state
+```
+
+A function witness records enough boundary information to replay a path:
+
+- Function and source location.
+- Scenario and request inputs.
+- Relevant arguments and selected locals.
+- Authentication identity and claims, without storing raw secrets or JWTs.
+- Database records or query provenance needed by the path.
+- Outputs, side effects, and errors.
+- The source revision that produced the observation.
+
+The first witness only proves that the function worked for the captured input
+and state. It is not a claim that every possible input is correct. Additional
+cases can later be generated from the witness: missing records, alternate roles,
+invalid inputs, boundaries, and changed database states.
+
+For database-backed applications, start by recording the relevant state and
+query provenance from a safe run. Do not begin by mocking the entire database.
+The long-term replay target is a minimal isolated fixture, such as an ephemeral
+PostgreSQL database, with a deterministic test identity. Query mocking remains
+useful for external services but should not hide the application's real joins,
+constraints, or transactions.
+
+The implementation should grow in this order:
+
+1. Capture breakpoint hits and selected runtime state.
+2. Link each hit back to the changed AST declaration and source revision.
+3. Save a successful end-to-end run as an execution witness.
+4. Generate a basic replayable frontend or API test from that witness.
+5. Generate minimal database fixtures and additional input cases.
+
+This keeps the human's normal workflow intact: run the app, use the debugger,
+understand what happened, and then decide which observed path deserves to become
+a test.
+
 ## The Inquiry Path
 
 The primary interaction is an unbounded path of identical explorer columns:

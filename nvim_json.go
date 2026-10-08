@@ -26,8 +26,11 @@ type nvimEdit struct {
 }
 
 type nvimFile struct {
-	Path  string     `json:"path"`
-	Edits []nvimEdit `json:"edits"`
+	Path    string     `json:"path"`
+	Edits   []nvimEdit `json:"edits"`
+	Added   bool       `json:"added,omitempty"`
+	Deleted bool       `json:"deleted,omitempty"`
+	Error   string     `json:"error,omitempty"`
 }
 
 type nvimResponse struct {
@@ -60,9 +63,16 @@ func runNvimJSON(arguments []string) error {
 		if err != nil {
 			return err
 		}
+		if len(source) == 0 || len(target) == 0 {
+			response.Files = append(response.Files, nvimFile{
+				Path: path, Edits: []nvimEdit{}, Added: len(source) == 0 && len(target) > 0, Deleted: len(source) > 0 && len(target) == 0,
+			})
+			continue
+		}
 		state, err := engine.NewWorkingStateFromLanguage(nvimLanguage(path), source, target)
 		if err != nil {
-			return fmt.Errorf("%s: %w", path, err)
+			response.Files = append(response.Files, nvimFile{Path: path, Edits: []nvimEdit{}, Error: err.Error()})
+			continue
 		}
 		snapshot := state.Snapshot()
 		file := nvimFile{Path: path, Edits: make([]nvimEdit, 0, len(snapshot.Edits))}
@@ -114,7 +124,7 @@ func nvimRevisionBytes(directory, revision, path string) ([]byte, error) {
 	}
 	contents, err := exec.Command("git", "-C", directory, "show", revision+":"+path).Output()
 	if err != nil {
-		if _, statErr := os.Stat(filepath.Join(directory, filepath.FromSlash(path))); os.IsNotExist(statErr) {
+		if verifyErr := exec.Command("git", "-C", directory, "rev-parse", "--verify", revision+"^{commit}").Run(); verifyErr == nil {
 			return []byte{}, nil
 		}
 		return []byte{}, fmt.Errorf("read %s at %s: %w", path, revision, err)

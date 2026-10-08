@@ -1,84 +1,40 @@
 # Contuts
 
-Contuts is an experiment in keeping a human mentally involved while AI changes
-the codebase.
+Contuts automates the repetitive parts of debugging code changes without
+replacing the debugger.
 
-AI can make a large implementation quickly. The risk is not only that the code
-is wrong. The risk is that the code is correct and the human no longer knows
-where behavior lives, how the system evolved, or what a change actually did.
-
-Contuts explores a simple loop:
+Its current job is simple:
 
 ```text
-inspect a change
-    -> apply a meaningful structural group
-    -> run a known scenario
-    -> observe what happened
-    -> inspect or investigate
-    -> continue from the new state
+compare the current code with a previous revision
+    -> find meaningful changed locations
+    -> place DAP breakpoints
+    -> start the selected debug sessions
+    -> let the human inspect, step, and continue
 ```
 
-The goal is not to make humans approve every line. The goal is to let AI do the
-typing while giving the human a way to stay oriented.
+Neovim and `nvim-dap` remain responsible for the debugging experience: stopping
+at breakpoints, showing source and stack frames, displaying locals, and stepping
+through code.
 
-## Two Tools
+## What Contuts Does
 
-Contuts has two related responsibilities.
+Contuts has two connected parts:
 
-### AST Evolution
+1. **Change context**: compare a source revision with the current working tree
+   and show the affected semantic regions.
+2. **Debug setup**: turn useful changed TypeScript locations into DAP
+   breakpoints and launch the frontend, backend, or both.
 
-The engine compares two repository states and produces structural AST edits.
-The AST is used to make controlled, valid changes and to show what changed
-before and after an edit.
+It does not try to become a new editor or a new debugger. It does not replace
+normal Neovim editing, DAP stepping, or the existing JavaScript debugger.
 
-The AST is not intended to be the primary human abstraction. Syntax shells such
-as punctuation, delimiters, import containers, and block wrappers are applied
-automatically. Human-facing review should focus on top-level semantic edit
-groups.
+Historical execution records are the reason for connecting source comparison to
+debugging. They are a later layer for answering, "What changed, and what did
+that change do when it ran?" They are not required to use the current debugger
+workflow.
 
-For example, a human should normally see:
-
-```text
-Add books persistence model
-Register the migration
-Load books from the repository
-Expose books from the API
-```
-
-not a list of every comma, identifier, and syntax node required to render those
-changes.
-
-Each group can be expanded when structural detail is useful. Applying a group
-applies the complete AST subtree, including the syntax edits that support it.
-
-### Execution History
-
-The debugger side records what happened when a source state ran.
-
-An execution record can contain:
-
-- The source checkpoint.
-- The command, input, environment, and fixtures.
-- Breakpoints and debugger locations.
-- Stack frames and observed values.
-- Output, errors, and the final result.
-- Paths reached during the run.
-- The first observable difference from another run.
-
-Normal debuggers remain responsible for stepping through a live process. Contuts
-organizes repeatable scenarios and keeps the history connected to source
-checkpoints. Going back initially means restoring a source checkpoint and
-replaying the scenario. For the interpreter, complete runtime snapshots may
-eventually allow direct state restoration.
-
-## Neovim First
-
-Neovim is the primary editing and debugging surface. Contuts does not try to
-replace it with another code editor or debugger.
-
-The first Neovim integration displays the files changed between two revisions
-and their structural edits. It is intentionally read-only for now; application
-and checkpoint commands will use the same engine next.
+## Current Neovim Workflow
 
 Build the command-line tool:
 
@@ -86,195 +42,156 @@ Build the command-line tool:
 go build -o "$HOME/bin/contuts" .
 ```
 
-Add the plugin to your Neovim configuration:
-
-```lua
-local contuts = require("contuts")
-
-contuts.setup({
-  command = vim.fn.expand("~/bin/contuts"),
-  directory = vim.fn.getcwd(),
-  base = "HEAD~1",
-  compare = "working-tree",
-})
-```
-
-Open the edit overview:
-
-```vim
-:Contuts
-```
-
-The overview lists changed files and their AST edits. Press `<CR>` on an edit
-to open its file and source location. Press `r` to refresh and `q` to close.
-
-The command-line JSON interface can also be used directly:
-
-```sh
-contuts --nvim-json /path/to/repository HEAD~1 working-tree
-```
-
-The JSON response is deliberately small and stable enough for editor clients:
+The Neovim plugin is configured with the path to that binary. The project must
+provide a `.contuts.json` file describing its debug targets:
 
 ```json
 {
-  "schema": "contuts.nvim.v1",
-  "directory": "/path/to/repository",
-  "base": "HEAD~1",
-  "compare": "working-tree",
-  "files": [
-    {
-      "path": "server/src/db.ts",
-      "edits": []
-    }
-  ]
+  "frontend": {
+    "command": "pnpm dev:web",
+    "url": "http://localhost:5173"
+  },
+  "backend": {
+    "entry": "packages/functions/src/server.ts"
+  }
 }
 ```
 
-## Human Build And Git
+From the project directory:
 
-Proposal targets remain immutable. The Human build is the mutable state where
-selected structural groups from one or more proposals are combined.
-
-The workflow is:
-
-```text
-choose a current baseline
-    -> choose one or more proposal sources
-    -> inspect semantic edit groups
-    -> apply selected groups to Human build
-    -> run or debug the Human build
-    -> commit Human build on the current Git branch
+```vim
+:ContutsDebug
 ```
 
-The tool does not move `main`. If the repository is on `feature/login`, the
-Human build commit is made on `feature/login`. The interface should always make
-these contexts explicit:
+Contuts compares `HEAD~1` with the working tree, prepares breakpoints, and asks
+which target to debug: `frontend`, `backend`, or `both`.
 
-```text
-branch: feature/login
-base: <baseline revision>
-compare to: <selected branch or commit>
-proposal: <proposal source>
+Review the generated breakpoints in `nvim-dap-ui`. Remove a breakpoint with `d`
+when it is only startup or module-initialization noise. Then launch:
+
+```vim
+:ContutsDebugStart
 ```
 
-## Architecture View
+The sessions behave like normal DAP sessions:
 
-The most useful overview is not a giant edit tree. It is a map of the system:
+- A breakpoint hit pauses execution automatically.
+- Neovim jumps to the stopped source line.
+- DAP UI shows the stack, scopes, and locals.
+- `<leader>dc` continues.
+- `<leader>dn` steps over.
+- `<leader>di` steps into.
+- `<leader>do` steps out.
 
-```text
-project
-  -> package or folder
-      -> file
-          -> declaration
-              -> imports, callers, callees, references
+The Contuts-specific breakpoint commands are:
+
+```vim
+:ContutsBreakpoints
+:ContutsDebugReload
+:Contuts2Debug
 ```
 
-The architecture view should answer:
+`<leader>dp` opens the breakpoint list. `:ContutsDebugReload` refreshes the
+breakpoint plan and restarts the active session after a source change.
+`:Contuts2Debug` refreshes the `HEAD~1` comparison before preparing the plan.
 
-- Where does this behavior live?
-- What files and packages are involved?
-- What depends on this declaration?
-- Which files changed together?
-- Which execution entry point can exercise the change?
+## Frontend And Backend
 
-This is the part that is difficult to get from a normal Neovim session. The
-Neovim plugin can remain focused on editing and debugging while Contuts provides
-the repository-level map.
+When debugging `both`:
 
-## Debugger Integration
+- The backend is launched through the Node DAP adapter.
+- The frontend development command starts normally, such as Vite.
+- A browser DAP session launches against the configured frontend URL.
+- Vite's logs are process output; they are not the backend DAP session.
 
-Contuts should use existing debugger technology rather than become a universal
-debugger.
+The backend DAP session is visible in the DAP stack with its Node process and
+source frame. A request breakpoint is only hit when the browser or another
+client actually calls that backend route.
 
-- Go: Delve through DAP.
-- JavaScript and TypeScript: Node inspector or `vscode-js-debug`.
-- Other languages: their existing DAP adapter where practical.
-- Interpreter execution: Contuts instrumentation, because the runtime is under
-  our control.
-
-Neovim and `nvim-dap` are well suited for breakpoints, stepping, stack frames,
-locals, watches, and test debugging. Contuts adds the missing history around
-those sessions: which source checkpoint ran, with which input, and how its
-observed execution compared with another checkpoint.
-
-## Interpreter Experiment
-
-The interpreter is the first execution target because its complete path is
-observable:
+Automatic breakpoints come from changed files. To add a breakpoint that is not
+part of the current diff, open the source, place the cursor on the line, and
+press:
 
 ```text
-source
-  -> tokens
-  -> AST
-  -> environment
-  -> evaluation
-  -> function calls
-  -> values
-  -> result
+<leader>db
 ```
 
-A useful first experiment is:
+Add manual breakpoints after `:ContutsDebug` prepares the plan and before
+`:ContutsDebugStart` launches it.
+
+## Source Comparison
+
+The command-line comparison is also available directly:
+
+```sh
+contuts --nvim-json /path/to/project HEAD~1 working-tree
+```
+
+The JSON output gives editor integrations a stable list of changed files and
+structural edits. Contuts filters syntax-only nodes so the default breakpoint
+plan focuses on executable locations rather than every punctuation or delimiter
+in the AST.
+
+The comparison is context, not a second checkout. Debugging runs the current
+working tree. `HEAD~1` is shown to explain what changed.
+
+## Execution History
+
+The longer-term purpose is to connect a source change to observed behavior. A
+future execution record can capture:
+
+- The source revision and comparison.
+- The scenario, input, environment, and fixtures.
+- Breakpoint locations and stack frames.
+- Selected locals or watched values.
+- Output, errors, and the final result.
+- The first observable difference between two runs.
+
+The intended loop is:
 
 ```text
-run historical input against state A
-    -> save trace A
-apply one semantic edit group
-    -> run the same input against state B
-    -> save trace B
-compare the traces and locate the first divergence
+change code
+    -> compare the change
+    -> run the same scenario
+    -> inspect the stopped state
+    -> compare the observed result with the previous state
 ```
 
-If a path is not reached, the tool should say so. It should distinguish:
+This is historical context around ordinary debugging. It should help restore a
+mental model after an AI-assisted change, not force a new debugging language on
+the user.
 
-- Not reached: the scenario did not execute the path.
-- Blocked: the path needs different input, fixtures, or environment setup.
-- Observed: the path executed and produced evidence.
+## Watch Sessions
 
-Creating the setup required to reach a path should remain separate from the code
-change being investigated.
+The experimental watcher records source checkpoints and process output:
 
-## Current Direction
+```sh
+contuts watch \
+  --directory /path/to/project \
+  --command "pnpm dev:web"
+```
 
-The immediate direction is deliberately narrow:
+Use `--once` to run a command once:
 
-1. Keep the AST engine as the trusted structural application layer.
-2. Show top-level semantic edit groups by default.
-3. Use Neovim for source editing and debugger interaction.
-4. Use Contuts for architecture, source checkpoints, scenarios, and history.
-5. Build one replayable before/after execution experiment for the interpreter.
+```sh
+contuts watch \
+  --directory /path/to/project \
+  --command "pnpm build" \
+  --once
+```
 
-The project is an experiment, not a claim that every engineer needs this
-workflow. The result should be judged by one question:
-
-> After an AI-driven change, do I understand the codebase and its behavior
-> better because I could observe the transition?
+Watch records are experimental. They are separate from the live DAP session.
 
 ## Development
 
-Run the root tests:
+Run the Go tests:
 
 ```sh
 go test ./...
 go test -race ./...
 ```
 
-Run the desktop tests:
-
-```sh
-cd desktop
-go test .
-go test -race .
-```
-
-Run the React frontend tests and build:
-
-```sh
-cd desktop/frontend-react
-npm test
-npm run build
-```
-
-The repository contains experimental desktop, terminal, AST, and debugger
-prototypes. They are implementation material for testing the mental-model
-hypothesis, not separate product commitments.
+The repository contains AST, terminal, desktop, watcher, and debugger
+prototypes. The practical product boundary today is the Neovim workflow above:
+automate breakpoint placement and debug-session startup, then let the existing
+debugger show what happened.

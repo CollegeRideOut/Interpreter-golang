@@ -1,392 +1,104 @@
-# Direction
+# Contuts Direction
 
-## Mission
-
-`contuts` is a directed code-exploration and program-transformation
-environment. It should help a person understand how code relates, ask focused
-questions about it, and deliberately move the working program from one state
-to another.
-
-The product is not a fixed tree, a two-pane dependency viewer, or an opaque AI
-patch generator. It is a sequence of visible questions over a working codebase.
-
-## Debugger-Native End-To-End Testing
-
-The practical product center is a debugger-native end-to-end testing loop. The
-user should be able to explore a real scenario from Neovim, stop inside the
-changed code, inspect the state, and preserve a successful path as evidence and
-eventually as a repeatable test.
+Contuts is a context saver and build surface for AI-assisted software work.
+It helps a person stay mentally involved by connecting four things:
 
 ```text
-change code
-    -> compare the change
-    -> start the frontend and backend
-    -> perform a real scenario
-    -> stop at changed code
-    -> inspect state and continue
-    -> save the execution witness
-    -> generate or replay a test
+Git change
+    -> AST change pointers
+        -> configurable runtime adapters
+            -> saved experiment context
 ```
 
-Contuts is not replacing `nvim-dap`. DAP remains the debugger. Contuts connects
-the source change, the runtime stop, and the resulting test evidence.
+Contuts does not replace the editor, the debugger, the test runner, or the
+application. It assembles the context needed to use those tools deliberately.
 
-The core evidence chain is:
+## The Landed Workflow
 
 ```text
-AST fact       -> this code changed
-runtime fact   -> execution reached this changed location
-state fact     -> these inputs, locals, and outputs were observed
-test witness   -> this scenario produced this result for this state
+choose a base commit
+    -> compare it with the current revision or working tree
+    -> generate pointers to changed executable locations
+    -> choose configured runtime targets
+    -> start a normal debug session
+    -> run a real scenario
+    -> save the experiment context
+    -> rerun the experiment later
 ```
 
-A function witness records enough boundary information to replay a path:
+The human remains in the debugger. Contuts does not add a second stepping model.
 
-- Function and source location.
-- Scenario and request inputs.
-- Relevant arguments and selected locals.
-- Authentication identity and claims, without storing raw secrets or JWTs.
-- Database records or query provenance needed by the path.
-- Outputs, side effects, and errors.
-- The source revision that produced the observation.
+## Context Build
 
-The first witness only proves that the function worked for the captured input
-and state. It is not a claim that every possible input is correct. Additional
-cases can later be generated from the witness: missing records, alternate roles,
-invalid inputs, boundaries, and changed database states.
+An experiment can preserve:
 
-For database-backed applications, start by recording the relevant state and
-query provenance from a safe run. Do not begin by mocking the entire database.
-The long-term replay target is a minimal isolated fixture, such as an ephemeral
-PostgreSQL database, with a deterministic test identity. Query mocking remains
-useful for external services but should not hide the application's real joins,
-constraints, or transactions.
+- Base commit, current revision, branch, and target configuration.
+- Generated and manually retained breakpoints.
+- Changed-code hit counts and DAP stop events.
+- Database snapshots and optional restore commands.
+- Configured environment-file references, with copying opt-in.
+- Browser actions, network captures, traces, console output, and screenshots.
+- Backend/API artifacts supplied by their adapters.
 
-The implementation should grow in this order:
+An experiment is a saved context build, not a claim that the whole program has
+been proven correct.
 
-1. Capture breakpoint hits and selected runtime state.
-2. Link each hit back to the changed AST declaration and source revision.
-3. Save a successful end-to-end run as an execution witness.
-4. Generate a basic replayable frontend or API test from that witness.
-5. Generate minimal database fixtures and additional input cases.
+## AST Change Pointers
 
-This keeps the human's normal workflow intact: run the app, use the debugger,
-understand what happened, and then decide which observed path deserves to become
-a test.
+The AST engine compares two source states and identifies meaningful changed
+locations. For debugging, executable locations become DAP breakpoints. The
+coverage view reports which generated locations were reached and how often.
 
-## The Inquiry Path
-
-The primary interaction is an unbounded path of identical explorer columns:
+This is intentionally narrower than full branch or path coverage:
 
 ```text
-column 0: starting program or selected edit
-    -> column 1: imported package
-        -> column 2: selected file
-            -> column 3: declaration
-                -> column 4: callers, callees, dependents, or impact
+changed location -> breakpoint -> runtime stop -> hit count
 ```
 
-The first column is the user's starting point. Each later column exists because
-the user asked a question from the previous column. The rightmost column is
-always available for the next question.
+The AST points the human back to the code that changed. The debugger shows what
+that code did when it ran.
 
-A column is a reusable explorer, not a special-purpose result panel. It should
-be able to show the same package, file, declaration, source, import, API, and
-relationship views regardless of how it was opened.
+## Runtime Adapters
 
-The path must preserve context:
+Targets and capture mechanisms are configured in the project’s `.contuts.json`.
+Contuts should not assume that every project has a frontend and backend.
 
-- Highlight the source item that caused the next column to open.
-- Highlight the selected answer in the new column.
-- Show the relationship type, such as `imports`, `calls`, `used by`, or
-  `affected by`.
-- Keep the starting column visible while exploring to the right.
-- Allow returning to an earlier column without losing the path.
+Useful adapters include:
 
-## Cycles And Separate Questions
+- Node or another DAP target for runtime stops and stack state.
+- HTTP/API drivers for backend-only scenarios.
+- PostgreSQL or another database adapter for snapshots and query evidence.
+- Browser/Playwright adapters for frontend actions and browser network traffic.
+- Process adapters for services, workers, and custom scenario commands.
 
-Code relationships are not guaranteed to form a tree. They can contain cycles,
-shared dependencies, and repeated references.
+Each adapter contributes artifacts to the same experiment directory. The common
+experiment ID is the connection between a browser action, an API request, a
+database snapshot, and a debugger stop.
 
-The first useful behavior is not to invent a complex graph UI. It is to make
-the path honest:
+## Reruns
 
-```text
-target already exists earlier in this path
-Previously opened at column 2
-Open again anyway | Return to existing column
-```
+`:ContutsDebugRerun` selects a saved experiment and creates a child run. It can
+restore the saved database, load the saved breakpoints, reuse the selected
+targets, and preserve the Git comparison. It does not switch the current branch
+automatically.
 
-If the user asks an unrelated question, create a separate inquiry path or row.
-Do not make unrelated files appear to be part of the current explanation.
+Replaying an experiment is strongest when the starting database, environment,
+inputs, dependencies, and external responses are controlled. The system should
+state what was restored and what remained live rather than pretending that a
+single replay is universal proof.
 
-## Relationship Facts
+## Boundaries
 
-The engine should expose relationships as facts with explicit confidence and
-origin where needed:
+Contuts should not:
 
-```text
-import      -> this file imports that package
-reference   -> this identifier resolves to that declaration
-call        -> this function calls that function
-dependent   -> this package or file uses the selected declaration
-impact      -> this code may observe the selected change
-```
+- Replace nvim-dap’s normal debugger controls.
+- Pretend that a breakpoint hit proves behavior is correct.
+- Capture secrets by default.
+- Treat a browser as the only way to exercise a backend.
+- Generate tests from every observed value without human context.
+- Switch branches or overwrite a working tree during a rerun.
 
-These claims must stay separate from interpretation:
+The practical question is:
 
-```text
-AST diff        -> syntax changed
-References      -> definitions and uses
-Call analysis   -> callers and callees
-Type analysis   -> type observations
-Impact analysis -> possible affected code
-Human label     -> an explicitly chosen interpretation
-```
-
-The tool may help the user explore relationships. It must not claim that a
-generated graph is the true architecture of the system.
-
-## Edit Evolution And Line Of Sight
-
-The dependency path and edit history should meet at the selected code. When a
-user explores an edit, show the relevant line of sight from broad operation to
-concrete consequence:
-
-```text
-operation
-    -> parent edit
-        -> child edit
-            -> affected declaration
-                -> related file or package
-                    -> resulting source and diagnostics
-```
-
-This is a linear story only for related work. Unrelated edits are excluded from
-the story and shown in another lane or explorer.
-
-An edit operation records:
-
-- Input working-state revision.
-- Selected node or subtree.
-- Origin and current instance identity.
-- Destination and insertion mode.
-- Explicit substitutions or renames.
-- Materialized low-level edits.
-- Output working-state revision.
-- Diagnostics produced by the new state.
-- Relationships discovered from the changed code.
-
-A high-level operation is only a grouping. Each materialized edit can be
-applied, removed, inspected, or changed independently. Applying an edit should
-update the working state and refresh the visible related-code path.
-
-The point is not merely to catch bad AI output. Even when every proposed edit
-is accepted, the user should be able to walk through how the program evolved:
-
-```text
-AI proposal
-    -> parent AST edit
-        -> child edit
-            -> changed declaration
-                -> affected type or reference
-                    -> next working revision
-```
-
-Rejecting or changing a child creates a new branch from the current working
-state. Applying an edit is both a user authorization and an observation of the
-next state. The system should preserve a causal thread for each step:
-
-- Edit and parent edit identity.
-- Source and destination AST identities.
-- Before and after state.
-- Affected declarations and relationships.
-- Working-state revision.
-- Diagnostics and verification results.
-
-The UI should distinguish `changed directly`, `referenced by`, `potentially
-affected`, and `verified by tests`. A line of sight is an evidence chain, not a
-claim that every nearby part of the codebase is impacted.
-
-## Human Authority And AI
-
-The human chooses the starting point, question, constraints, and accepted
-working state. AI can help locate a node, propose an edit, or explain an
-observation.
-
-```text
-human chooses a target or question
-    -> AI proposes bounded work
-        -> contuts exposes relationships and concrete edits
-            -> human accepts, rejects, or changes the work
-                -> continue from the chosen state
-```
-
-There must be no hidden AI edit path. A model's explanation is not evidence of
-intent. The system should distinguish observed facts, AI hypotheses, requested
-transformations, and verified results.
-
-## Structural Contracts For Agent Loops
-
-The engine should eventually give an AI or ACP-connected agent a structural
-interface for requesting and correcting edits. The human can state an
-observable goal:
-
-```text
-Explore functions X and Y.
-The top-level AST must export these four functions.
-The functions must satisfy interface Z.
-The implementation must call this package from that file.
-```
-
-The engine turns the goal into conditions and checks each working revision:
-
-```text
-required exports: satisfied
-required interface: missing method
-required package reference: present
-required call relationship: wrong target
-```
-
-The agent can then iterate through bounded edits, but it does not judge its own
-success:
-
-```text
-human states contract
-    -> agent proposes edit
-        -> engine applies a working revision
-            -> engine verifies structural conditions
-                -> agent receives exact failures
-                    -> next proposed edit
-```
-
-The engine may say that the AST does not export the required declarations, that
-a call reaches the wrong package, or that an interface method is missing. The
-human owns the contract and decides whether a revision is accepted. The engine
-is authoritative only for facts it can observe; semantic behavior and
-architectural intent remain explicit hypotheses.
-
-## Structural Core
-
-The UI is a view over an authoritative structural engine. The initial operations
-remain deliberately concrete:
-
-```text
-select(anchor)
-capture(subtree)
-replace(target, subtree)
-move(target, destination)
-wrap(target, wrapper)
-substitute(edit, explicit bindings)
-preview(edit)
-apply(edit)
-remove(edit)
-```
-
-The engine should preserve source fragment, AST structure, provenance,
-destination, substitutions, before state, after state, and the operation that
-produced each edit.
-
-AST pointers and list indexes are not durable identities. Mutations can rebuild
-parents and shift positions. Every working occurrence needs an instance
-identity, while copied code retains provenance to its origin. Stale or
-ambiguous anchors become pending or conflicted; they are never silently moved
-to a merely similar location.
-
-## Intermediate States
-
-Wrong and incomplete states are part of exploration:
-
-- An incomplete declaration.
-- A missing expression.
-- An unresolved identifier.
-- A type mismatch.
-- A broken import relationship.
-- A declaration in the wrong package.
-
-The tool should preserve these states and attach observations:
-
-```text
-Structural state: incomplete
-Parser state: failed at line 18
-Type state: unavailable
-Tests: not run
-AI suggestion: replace this expression
-```
-
-A failed transformation, invalid structure, type failure, build failure, test
-failure, and disagreement with an AI proposal are different events.
-
-## Implementation Order
-
-The next UI architecture should be small and composable:
-
-1. Extract one `ExplorerColumnComponent` from the current explorer markup.
-2. Give a column its own target, selection, lens, source, and history state.
-3. Render an array of columns instead of hard-coding primary and secondary panes.
-4. Append a column when the user selects a relationship.
-5. Preserve the originating selection and label the relationship edge.
-6. Detect repeated targets and offer the existing column or an explicit reopen.
-7. Add separate inquiry rows for unrelated questions.
-8. Connect selected edits to affected-code relationships.
-9. Render related parent-to-child edit evolution below the inquiry path.
-10. Add deeper reference, call, type, and impact analysis only when it improves
-    a real question.
-
-The immediate development focus is the UI. The engine work already in the
-repository is foundational and will take time to understand. The interface
-should first become a useful instrument for steering and observing the existing
-engine rather than requiring the whole engine to be redesigned at once.
-
-Do not start by building a formal graph editor. The path should earn graph
-features through use.
-
-## What Not To Build First
-
-- A two-pane limit.
-- A special imported-source screen that duplicates explorer behavior.
-- A graph that claims to know the user's architecture.
-- Automatic intent inference.
-- Silent substitutions or renames.
-- Automatic edits at every similar location.
-- AI-generated summaries as the primary experience.
-- Hidden AI mutations.
-- Mandatory validity gates.
-- A formal transformation language before concrete transformations work.
-
-## Product Test
-
-The product is working when a user can start from a changed declaration and
-ask:
-
-```text
-What imports this?
-What does it call?
-Who depends on it?
-What else is affected by this edit?
-Show me the related edit evolution.
-Keep this part, remove that part, and continue from the resulting state.
-```
-
-The answer should be an explorable, honest path through code and concrete edits,
-not a persuasive paragraph disconnected from the working program. The user
-should be able to follow the evolution even when they agree with the AI, and
-intervene at any point when they do not.
-
-## Current Reality
-
-The repository is still an experimental AST and working-state prototype. It
-already has useful parsing, structural edit, package, file, and import
-mechanics, but its Angular UI is being reorganized from special-cased panes to
-reusable columns. Reference, call, type, impact, and durable branching support
-remain future work.
-
-The longer-term boundary is a headless inquiry and transformation API. Angular,
-the CLI, MCP, an editor plugin, or an ACP client should be replaceable clients
-over the same facts, relationships, working revisions, and edit history.
-
-The project should keep mechanics that help a person understand and direct a
-working state. If more controls do not improve that loop, the project should be
-willing to call the experiment a gimmick and change direction. There are no
-promises yet; the UI is the place to steer the experiment and discover whether
-the line of sight through code evolution is genuinely useful.
+> After an AI-assisted change, can the human quickly see what changed, run it,
+> understand the important behavior, and return to the same context later?

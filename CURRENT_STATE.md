@@ -1,106 +1,79 @@
 # Current State
 
-Last updated: 2026-09-14
+Last updated: 2026-10-10
 
-## Product Direction
+## Product
 
-contuts is exploring a headless, evidence-preserving code inquiry and
-transformation engine. The intended UI is an unlimited left-to-right path of
-reusable explorer columns. The user starts at the left and asks questions into
-the right: imports, same-package references, types, callers, callees,
-dependents, and edit consequences.
-
-The important product idea is a causal line of sight through code evolution:
+Contuts is currently a context saver/build for AI-assisted development. Its
+working path is Neovim plus nvim-dap:
 
 ```text
-AI proposal -> parent edit -> child edit -> affected code -> working revision
+base commit + current code
+    -> AST change pointers
+    -> configurable targets
+    -> normal DAP session
+    -> saved experiment
+    -> rerun
 ```
 
-The user can accept every edit and still gain understanding by walking through
-the transitions. The user can also reject or alter an edit and continue from a
-new branch of the working state.
+The human uses the debugger to understand the code. Contuts prepares and saves
+the context; it does not replace debugging.
 
-## What Exists
+## Implemented
 
-- Go AST export and field-aware structural diffs.
-- Mutable working AST and reversible edit operations.
-- Reconciliation and lifted edit views.
-- Wails desktop application.
-- Package, file, declaration, import, and source exploration.
-- Parameter, result, variable, and named-type display metadata.
-- Direct same-package reference discovery across sibling files.
-- Same-package reference and type links that open related files.
-- Calorie-counter multi-package fixture in `TestProgramCalorieApp/`.
-- Structural contract and agent-loop direction documented, but not implemented.
-- First proposal-branch slice: immutable base plus independent proposal working
-  states seeded from the current-to-compare structural diff.
-- Proposal branch selection and branch-local apply/remove state in the desktop UI.
-- Proposal review mode: select multiple proposal targets from one shared base and
-  accept their structural edits into a persistent Human build.
+- Go AST and language-aware structural comparison.
+- TypeScript, TSX, HTML, and Go change JSON for editor integrations where
+  supported by the current engine.
+- Configurable base commit and current comparison.
+- Current-branch commit picker for `:Contuts` and `:ContutsDebug`.
+- Composable `.contuts.json` target definitions.
+- Node and browser target startup through normal DAP configuration.
+- Automatic breakpoints for meaningful changed executable locations.
+- DAP stop notifications and changed-location hit counts.
+- `:ContutsCoverage` for reached changed locations.
+- Experiment directories created by `:ContutsDebug`.
+- Git, target, breakpoint, and DAP event metadata.
+- Configurable database snapshot and restore commands.
+- Optional environment-file capture.
+- Playwright browser action, network, trace, and console capture for projects
+  that configure a recorder command.
+- `:ContutsDebugRerun` with saved breakpoint and experiment context.
+- A watcher that records source checkpoints and process output.
 
-## Current UI Reality
+## Narrativo Example
 
-The Angular UI is still a hard-coded primary/secondary explorer prototype. It
-does not yet render an arbitrary array of identical columns. Imported files and
-same-package references currently open in the secondary context rather than a
-true unbounded path.
+The Narrativo project is configured with:
 
-The next UI architecture should extract the explorer into a reusable
-`ExplorerColumnComponent` and store independent column state in an array.
+- An API Node target.
+- A Vite/browser target.
+- A local PostgreSQL snapshot using `pg_dump`.
+- A PostgreSQL restore command using `pg_restore`.
+- A Playwright browser recorder.
 
-## Current Engine Reality
+The current working example compares an explicitly selected earlier commit with
+the working tree. Choosing `main` while already on `main` correctly produces no
+diff for a clean committed tree; choose an earlier commit to inspect its later
+changes.
 
-The engine is useful but only partially understood. AST parsing and structural
-editing are the current foundation. Name-based reference discovery is only a
-prototype and is not equivalent to full semantic resolution.
+## Known Limits
 
-Not yet implemented reliably:
+- Changed-location coverage is not branch or full path coverage.
+- DAP values are captured only where adapters or selected watches provide them.
+- Browser recording uses a dedicated Playwright browser rather than a personal
+  Chrome profile.
+- Backend network and database query adapters are configuration points; the
+  browser cannot see internal backend traffic by itself.
+- Reruns do not automatically checkout a branch.
+- Environment files are not copied unless explicitly enabled.
+- Database restore commands can overwrite data and should target disposable
+  databases.
 
-- Full symbol identity through `go/types` or `gopls`.
-- Imported type links from signatures.
-- Complete same-package, reference, call, caller, and callee analysis.
-- Dependents and impact analysis.
-- Structural contract verification API.
-- Agent/ACP edit loops.
-- Durable inquiry paths and cycle handling.
-- Edit-evolution timeline connected to affected-code relationships.
-- Proposal conflict detection and automatic composition.
+## Verification
 
-## Recommended Next Session
-
-Start in UI land rather than redesigning the engine:
-
-1. Extract the current explorer markup into one reusable column component.
-2. Replace primary/secondary state with an array of column targets.
-3. Append a new identical column when a relationship is selected.
-4. Preserve the originating selection and label the relationship.
-5. Add close/back behavior for the rightmost path.
-6. Add previously-opened detection for cycles.
-7. Keep unrelated questions in separate rows.
-8. Render a first edit-evolution strip below the inquiry path.
-
-Only after that should the analysis boundary be upgraded with `go/types`,
-`go/packages`, or LSP support.
-
-## Verification Last Run
-
-These checks passed during the last implementation session:
-
-```text
+```sh
 go test ./...
+cd /home/tuts/Work/personal/narrativo && pnpm build
 ```
 
-The frontend test runner reports 2 tests passing. Generated frontend artifacts
-may appear dirty after frontend checks.
-
-## Worktree Notes
-
-The repository contains uncommitted implementation and generated changes from
-the exploratory UI and engine work. Do not reset or discard them without
-reviewing them first. Documentation commits have been kept separate.
-
-Historical ideas remain in:
-
-- `oldREADME.md`
-- `oldDIRECTION.md`
-- `INTERFACE_IDEAS.md`
+Lua syntax is checked with `luac -p`, and the Narrativo debug flow is exercised
+through headless Neovim/DAP runs when changing the integration.

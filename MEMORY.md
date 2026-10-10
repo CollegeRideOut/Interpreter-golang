@@ -1,38 +1,73 @@
 # Project Memory
 
-## Current Direction
+## Current Mental Model
 
-`contuts` is a structural code-understanding and transformation tool. The
-engine owns normalized trees, identity-aware edits, lifting, reconciliation,
-working-state transitions, and reversible application. Language adapters own
-parsing and source representation.
+Contuts is a context saver/build for a human working with AI-generated code.
+The user wants to remain involved in the system by running it, seeing changed
+locations, debugging real behavior, and returning to the same setup later.
 
-## Supported Adapters
+```text
+AI changes code
+    -> Contuts points to the changed code
+        -> the human runs and debugs it
+            -> Contuts saves the context
+                -> the human can rerun it
+```
 
-- Go uses the existing `go/ast` adapter and Go-specific renderer/validation.
-- TypeScript uses the Tree-sitter TypeScript grammar for syntax-focused
-  parsing, structural diffing, applying, removing, and best-effort rendering.
-- HTML uses the Tree-sitter HTML grammar through the same structural engine.
+## Current Layers
 
-The public entry points are `ParseLanguage`, `DiffLanguage`, and
-`NewWorkingStateFromLanguage`. The desktop comparison path selects Go,
-TypeScript, or HTML from the file extension for `.go`, `.ts`, `.html`, and
-`.htm` files.
+### Change Layer
 
-## Important Boundaries
+The Go engine compares revisions and emits structural change data. The Neovim
+integration turns meaningful executable changes into breakpoint locations.
 
-- TypeScript support is syntax-focused. It does not yet resolve types,
-  references, `tsconfig` paths, project references, or cross-file symbols.
-- TSX/JSX is not enabled yet.
-- Workspace discovery and declaration exploration remain Go-specific, so the
-  desktop workspace does not automatically list TypeScript or HTML files yet.
-- Do not replace the generic structural engine with language-specific edit
-  logic. Add language behavior at the adapter/parser/render/validation seam.
+### Debug Layer
 
-## Verification
+nvim-dap remains the debugger. Contuts observes DAP stop events, maps stops to
+changed locations, and records hit counts and experiment events.
 
-Run the root tests with `go test ./...` and the desktop tests with
-`cd desktop && go test ./...`. The TypeScript test suite covers common syntax,
-language dispatch, applying/removing edits, inserted declarations, validation,
-and invalid source handling. The HTML suite covers parsing through the shared
-language dispatch and applying a text edit.
+### Adapter Layer
+
+Projects define targets and capture commands in `.contuts.json`. Adapters may
+provide DAP, HTTP, browser, database, process, or external-service evidence.
+
+### Experiment Layer
+
+An experiment stores the Git context, targets, breakpoints, database snapshot,
+environment choices, browser artifacts, and runtime events needed for a later
+rerun.
+
+## Security Rules
+
+- Do not commit `.env` files, database dumps, HAR files, cookies, or tokens.
+- Environment-file capture must be explicitly enabled.
+- Database snapshots should target disposable local databases.
+- Network and runtime artifacts may contain personal or secret data.
+- A rerun must not silently switch branches or overwrite the working tree.
+
+## Language Boundaries
+
+TypeScript support is currently syntax-focused. It does not claim complete type,
+symbol, call, or cross-project analysis. AST pointers are useful context, not a
+semantic proof of impact.
+
+The generic structural engine remains separate from language adapters. Add
+language-specific behavior at parsing, source, rendering, validation, or runtime
+adapter boundaries.
+
+## Useful Commands
+
+```sh
+go test ./...
+go build -o "$HOME/bin/contuts" .
+```
+
+In a configured project:
+
+```vim
+:Contuts
+:ContutsDebug
+:ContutsDebugStart
+:ContutsCoverage
+:ContutsDebugRerun
+```
